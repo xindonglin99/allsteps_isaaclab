@@ -33,47 +33,16 @@ class AllstepsEnv(DirectRLEnv):
 
         # joint gears for torque controller
         self.joint_gears = torch.tensor(self.cfg.joint_gears, dtype=torch.float32, device=self.device)
-        self.joint_gears *= 0.5
         self.force_scale = self.cfg.force_scale
-
-        # Setup grab conditions
-        # self.grab_conditions = torch.zeros((self.num_envs, 4), dtype=torch.float32, device=self.device)
-        self.random_target = self.cfg.random_target
-        if not self.random_target and self.cfg.num_targets > len(self.cfg.handhold_pos):
-            raise ValueError("Number of targets should be less than the number of handholds")
-        self.grab_conditions = torch.zeros((self.num_envs), dtype=torch.bool, device=self.device) # Set using left hand to grab
-        self.handhold_pos = torch.tensor(self.cfg.handhold_pos, device=self.device) + self.scene.env_origins.unsqueeze(1) # (num_envs, 3, 3)
-        self.current_target_idx = torch.zeros((self.num_envs), dtype=torch.int64, device=self.device)
-        self.hold_counter = torch.zeros((self.num_envs), dtype=torch.int64, device=self.device)
-        self.hold_counter_old = self.hold_counter.clone()
-        self.release_counter = torch.zeros((self.num_envs), dtype=torch.int64, device=self.device)
-        self.release_counter_old = self.release_counter.clone()
-        self.target_sequence = torch.zeros((self.num_envs, self.cfg.num_targets), dtype=torch.int64, device=self.device)
+        
         self.limb_names = self.cfg.limb_names
         key_body_names = self.limb_names # left toe, right toe, left wrist, right wrist
         self.key_body_indexes = [self.robot.data.body_names.index(name) for name in key_body_names]
         self.chest_index = self.robot.data.body_names.index(self.cfg.chest_name)
-        
-        
-        # Dynamic control API
-        self.dc = _dynamic_control.acquire_dynamic_control_interface()
-        self.d6_force_limit = 5000
-        self.d6_joint_stiffness = 700
-        self.d6_joint_damping = 70
-        self.d6_props = {}
-        self.d6_joints = {}
-        self.d6_info = {}
-        self.d6_env_ids = torch.zeros((self.num_envs), dtype=torch.bool, device=self.device)
 
         # to-target potentials (will be updated in reset_idx)
         self.potentials = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self.old_potentials = self.potentials.clone()
-        
-        self._pre_create_d6_joints()
-        if self.random_target:
-            self._generate_random_target_idx()
-        else:
-            self._generate_fix_target_idx()
 
         # Marker index
         self.marker_idx = torch.zeros((self.num_envs * 3), dtype=torch.int64, device=self.device)
@@ -118,61 +87,6 @@ class AllstepsEnv(DirectRLEnv):
         # create marker
         self.marker = VisualizationMarkers(self.cfg.handhold_markers)
         
-    def _pre_create_d6_joints(self):
-        rel_pose = self.robot.data.body_pos_w[torch.arange(self.num_envs), self.key_body_indexes[LimbNames.LeftHand.value]] - self.anchor.data.root_pos_w # changed here to also use GPU data
-        for i in range(self.num_envs):
-            base_path = f"/World/envs/env_{i}/" + self.cfg.base_path_robot
-            limb_paths = [ base_path + '/' + body_name for body_name in self.limb_names ]
-            hold_path = "/World/anchor"
-            for limb_path in limb_paths:
-                tmp_d6_properties = _dynamic_control.D6JointProperties()
-                tmp_limb_handle = self.dc.get_rigid_body(limb_path)
-                ground_handle = self.dc.get_rigid_body(hold_path)
-                tmp_d6_properties.axes = _dynamic_control.AXIS_NONE
-                tmp_d6_properties.body0 = ground_handle
-                tmp_d6_properties.body1 = tmp_limb_handle
-
-                # rel_pose = self.dc.get_relative_body_poses(ground_handle, [tmp_limb_handle])
-                tmp_d6_properties.pose0.p = (rel_pose[i, 0], rel_pose[i, 1], rel_pose[i, 2])
-                tmp_d6_properties.force_limit = self.d6_force_limit
-                tmp_d6_properties.stiffness = self.d6_joint_stiffness
-                tmp_d6_properties.damping = self.d6_joint_damping
-                d6_joint_name = limb_path + "_hold"
-                tmp_d6_properties.name = d6_joint_name
-                self.d6_props[d6_joint_name] = tmp_d6_properties
-                self.d6_joints[d6_joint_name] = self.dc.create_d6_joint(tmp_d6_properties)
-
-    def _grab(self, hold_path: str, relative_pos: torch.Tensor):
-        # Put on constraints
-        self.d6_props[hold_path].axes = _dynamic_control.AXIS_ALL_TRANSLATION
-        self.d6_props[hold_path].pose0.p = (relative_pos[0], relative_pos[1], relative_pos[2])
-        # You can see the difference of values when run on GPU.
-        #print(relative_pos, self.dc.get_relative_body_poses(self.d6_props[hold_path].body0, [self.d6_props[hold_path].body1])[0].p) 
-        # self.dc.set_d6_joint_properties(self.d6_joints[hold_path], self.d6_props[hold_path])
-
-        self.d6_info[hold_path] = True
-
-    def _release(self, hold_path: str):
-        # Disable constraints
-        self.d6_props[hold_path].axes = _dynamic_control.AXIS_NONE
-
-        # self.dc.set_d6_joint_properties(self.d6_joints[hold_path], self.d6_props[hold_path])
-        
-        # print(f"Releasing {hold_path}")
-        self.d6_info[hold_path] = False
-
-    def _reset_release(self, env_ids: torch.Tensor) -> None:
-        # already_grabbed = self.hold_counter > 0
-        # mask = already_grabbed & self.reset_buf 
-        # # TODO : In some conditions although the characters are not grabbing(self.hold_counter == 0), they didn't release grab.
-        # # We have to find the cause of this happening.
-        # root_spd = torch.norm(self.robot.data.root_com_lin_vel_w, dim=-1)
-        # mask = torch.where(root_spd >= 3, torch.ones_like(mask), mask) # TODO: temporal solution. But this is not fundamental solution.
-        # masked_ids = mask.nonzero(as_tuple=False).squeeze(-1)
-        release_path = self._generate_hold_path(env_ids)
-        self.d6_env_ids[env_ids] = False
-        for path in release_path:
-            self._release(path)
 
     def _pre_physics_step(self, actions: torch.Tensor):
         self.actions = actions.clone()
@@ -190,57 +104,6 @@ class AllstepsEnv(DirectRLEnv):
             self.marker_idx.view(self.num_envs, 3)[already_grabbed_idx, marker_offset[already_grabbed_idx]] = 1
         self.marker.visualize(translations=self.handhold_pos.view(-1, 3), marker_indices=self.marker_idx)
         
-    def _generate_hold_path(self, idx, limb_names = ["LeftWrist"]):
-        return [f"/World/envs/env_{i}/" + self.cfg.base_path_robot + f"/{limb_names[0]}_hold" for i in idx]
-        
-    def _grab_or_release(self):
-        # Check grab conditions
-        grabbed = self.actions_grab > 0 # Grab action
-        limb_to_target = self.robot.data.body_pos_w[:, self.key_body_indexes[LimbNames.LeftHand.value]] - self.handhold_pos[torch.arange(self.num_envs), self.target_sequence[torch.arange(self.num_envs), self.current_target_idx]]
-        reached = torch.linalg.vector_norm(limb_to_target, dim=-1) < self.cfg.grab_threshold # Reach target
-
-        ####### Debugging #######
-        # print(self.robot.data.root_pos_w[:, 2])
-        # print(grabbed)
-        # print(reached)
-        #########################
-
-        self.grab_conditions: torch.Tensor = grabbed & reached
-
-        not_yet_grabbed = self.hold_counter == 0
-        already_grabbed = self.hold_counter > 0
-
-        # Get index of the idx where we need to call set_d6_joint_properties, this way we can reduce the number of calls
-        need_d6_change_grab_idx = (not_yet_grabbed & self.grab_conditions).nonzero(as_tuple=False).flatten() # first time grab
-        need_d6_change_release_idx = (already_grabbed & (~self.grab_conditions)).nonzero(as_tuple=False).flatten() # grabbed that need to release
-
-        # Generate hold path (name of the d6 joint) and set the properties
-        if len(need_d6_change_grab_idx) > 0:
-            grab_path = self._generate_hold_path(need_d6_change_grab_idx)
-            self.d6_env_ids[need_d6_change_grab_idx] = True
-            rel_pos = self.robot.data.body_pos_w[need_d6_change_grab_idx, self.key_body_indexes[LimbNames.LeftHand.value]] - self.anchor.data.root_pos_w
-            for i, path in enumerate(grab_path):
-                self._grab(path, rel_pos[i])
-
-        if len(need_d6_change_release_idx) > 0:
-            release_path = self._generate_hold_path(need_d6_change_release_idx)
-            self.d6_env_ids[need_d6_change_release_idx] = False
-
-            for path in release_path:
-                self._release(path)
-        
-        # Save old hold counter 
-        self.hold_counter_old = self.hold_counter.clone()
-
-        # Update hold counter
-        self.hold_counter[self.grab_conditions] += 1
-        self.hold_counter[~self.grab_conditions] = 0
-
-        # Move to next target
-        can_progress = self.hold_counter > self.cfg.hold_counter_stop_frames
-        self.current_target_idx[can_progress] = clamp_index(self.current_target_idx[can_progress] + 1, 0, self.cfg.num_targets - 1)
-        self.hold_counter[can_progress] = 0
-
     def _apply_action(self):
         if self.cfg.pd_control:
             # PD controller
@@ -412,10 +275,6 @@ class AllstepsEnv(DirectRLEnv):
             env_ids = self.robot._ALL_INDICES
         self.robot.reset(env_ids)
         super()._reset_idx(env_ids)
-
-        self._reset_release(env_ids)
-        self.hold_counter[env_ids] = 0  
-        self.hold_counter_old[env_ids] = 0
         
         self.old_potentials[env_ids] = 0
         self.potentials[env_ids] = 0

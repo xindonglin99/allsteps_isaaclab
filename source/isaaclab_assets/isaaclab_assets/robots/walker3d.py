@@ -15,9 +15,9 @@ ASSET_ROOT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..
 ##
 
 WALKER_CFG = ArticulationCfg(
-    prim_path="{ENV_REGEX_NS}/Robot",
+    prim_path="/World/Robot",
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ASSET_ROOT_DIR}/Robots/Classic/Humanoid28/humanoid_28.usd",
+        usd_path=f"{ASSET_ROOT_DIR}/usd/walker3d.usd",
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=None,
             max_depenetration_velocity=10.0,
@@ -44,4 +44,4 @@ WALKER_CFG = ArticulationCfg(
         ),
     },
 )
-"""Configuration for the 28-DOFs Mujoco Humanoid robot."""
+"""Configuration for the Allsteps Humanoid robot."""

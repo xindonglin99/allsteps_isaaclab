@@ -9,6 +9,7 @@ from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 from isaaclab.markers import VisualizationMarkersCfg
 
+from isaaclab_assets import WALKER_CFG
 
 @configclass
 class AllstepsEnvCfg(DirectRLEnvCfg):
@@ -41,7 +42,7 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
 
     # robot
-    robot: ArticulationCfg = CLIMBER_CFG.replace(prim_path="/World/envs/env_.*/Robot")
+    robot: ArticulationCfg = WALKER_CFG.replace(prim_path="/World/envs/env_.*/Robot")
     
     joint_gears: list = [
         60, # abdomen_z
@@ -68,20 +69,6 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     ] # 21
     
     force_scale = 1.0
-
-    handhold_markers: VisualizationMarkersCfg = VisualizationMarkersCfg(
-        prim_path="/World/Visuals/handhold_markers",
-        markers={
-            "handhold_not_reached": sim_utils.SphereCfg(
-                radius=0.05,
-                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.0, 1.0), metallic=0.2),
-            ),
-            "handhold_reached": sim_utils.SphereCfg(
-                radius=0.05,
-                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0), metallic=0.2),
-            ),
-        }
-    )
     
     torso_name: str = "torso"
     foot_names: list = ["right_foot", "left_foot"]

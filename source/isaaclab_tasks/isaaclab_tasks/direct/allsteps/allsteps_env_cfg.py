@@ -9,7 +9,7 @@ from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 from isaaclab.markers import VisualizationMarkersCfg
 
-from isaaclab_assets import WALKER_CFG
+from isaaclab_assets import WALKER_CFG, HUMANOID_28_CFG
 
 @configclass
 class AllstepsEnvCfg(DirectRLEnvCfg):
@@ -23,7 +23,7 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     pd_control = False
 
     # simulation
-    sim: SimulationCfg = SimulationCfg(dt=1 / 240, render_interval=decimation)
+    sim: SimulationCfg = SimulationCfg(dt=1 / 120, render_interval=decimation)
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
         terrain_type="plane",

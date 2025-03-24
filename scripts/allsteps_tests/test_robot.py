@@ -21,7 +21,7 @@ import isaaclab.utils.math as math_utils
 from isaaclab.assets import RigidObject, Articulation
 from isaaclab.sim import SimulationContext
 
-from isaaclab_assets import WALKER_CFG
+from isaaclab_assets import WALKER_CFG, HUMANOID_28_CFG
 
 
 def design_scene():
@@ -33,7 +33,7 @@ def design_scene():
     cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.8, 0.8, 0.8))
     cfg.func("/World/Light", cfg)
     
-    robot = Articulation(cfg=WALKER_CFG)
+    robot = Articulation(cfg=WALKER_CFG.replace(prim_path="/World/Robot"))
 
     # return the scene information
     scene_entities = {"robot": robot}

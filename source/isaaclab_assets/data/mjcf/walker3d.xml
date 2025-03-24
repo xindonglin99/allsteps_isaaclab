@@ -26,6 +26,7 @@
     </visual>
     <worldbody>
         <body name="walker3d" pos="0 0 1.32">
+            <freejoint name="root"/>
             <body name="head" pos="0 0 .25">
                 <geom name="head" pos="0 0 0" size=".1" type="sphere" user="258"/>
             </body>
@@ -103,16 +104,6 @@
             </body>
        </body>
     </worldbody>
-    <tendon>
-        <fixed name="left_hipknee">
-            <joint coef="-1" joint="left_hip_y"/>
-            <joint coef="1" joint="left_knee"/>
-        </fixed>
-        <fixed name="right_hipknee">
-            <joint coef="-1" joint="right_hip_y"/>
-            <joint coef="1" joint="right_knee"/>
-        </fixed>
-    </tendon>
     <actuator><!-- this section is not supported, same constants in code -->
         <motor gear="60" joint="abdomen_z" name="abdomen_z"/>
         <motor gear="80" joint="abdomen_y" name="abdomen_y"/>

@@ -19,11 +19,20 @@ from isaaclab.markers import VisualizationMarkers
 from isaaclab.envs import DirectRLEnv
 from .allsteps_env_cfg import AllstepsEnvCfg
 
+DEG2RAD = np.pi / 180
+RAD2DEG = 180 / np.pi
+
 class AllstepsEnv(DirectRLEnv):
     cfg: AllstepsEnvCfg
 
     def __init__(self, cfg: AllstepsEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
+        
+        # Terrain info
+        self.dist_range = torch.tensor([0.65, 1.25], dtype=torch.float32, device=self.device)
+        self.pitch_range = torch.tensor([-30, 30], dtype=torch.float32, device=self.device)
+        self.yaw_range = torch.tensor([-20, 20], dtype=torch.float32, device=self.device)
+        self.tilt_range = torch.tensor([-15, 15], dtype=torch.float32, device=self.device)
 
         # action offset and scale for PD controller
         dof_lower_limits = self.robot.data.joint_limits[0, :, 0]

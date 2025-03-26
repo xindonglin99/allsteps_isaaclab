@@ -27,7 +27,7 @@ from isaaclab.utils import configclass
 ##
 # Pre-defined configs
 ##
-from isaaclab_assets import WALKER_CFG, HUMANOID_28_CFG  # isort:skip
+from isaaclab_assets import WALKER_CFG, HUMANOID_28_CFG, HUMANOID_CFG  # isort:skip
 
 
 @configclass
@@ -104,6 +104,8 @@ def main():
     sim.reset()
     # Now we are ready!
     print("[INFO]: Setup complete...")
+    
+    
     # Run the simulator
     run_simulator(sim, scene)
 

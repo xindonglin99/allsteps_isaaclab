@@ -33,6 +33,7 @@ class AllstepsEnv(DirectRLEnv):
         self.pitch_range = torch.tensor([-30, 30], dtype=torch.float32, device=self.device)
         self.yaw_range = torch.tensor([-20, 20], dtype=torch.float32, device=self.device)
         self.tilt_range = torch.tensor([-15, 15], dtype=torch.float32, device=self.device)
+        self.terrain_info = self.generate_foot_steps()
 
         # action offset and scale for PD controller
         dof_lower_limits = self.robot.data.joint_limits[0, :, 0]
@@ -44,10 +45,10 @@ class AllstepsEnv(DirectRLEnv):
         self.joint_gears = torch.tensor(self.cfg.joint_gears, dtype=torch.float32, device=self.device)
         self.force_scale = self.cfg.force_scale
         
-        self.limb_names = self.cfg.limb_names
-        key_body_names = self.limb_names # left toe, right toe, left wrist, right wrist
+        self.foot_names = self.cfg.foot_names
+        key_body_names = self.foot_names # right foot, left foot
         self.key_body_indexes = [self.robot.data.body_names.index(name) for name in key_body_names]
-        self.chest_index = self.robot.data.body_names.index(self.cfg.chest_name)
+        self.torso_index = self.robot.data.body_names.index(self.cfg.torso_name)
 
         # to-target potentials (will be updated in reset_idx)
         self.potentials = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
@@ -58,16 +59,8 @@ class AllstepsEnv(DirectRLEnv):
         self.marker.visualize(translations=self.handhold_pos.view(-1, 3), marker_indices=self.marker_idx)
     
         
-    def _generate_random_target_idx(self, env_ids: torch.Tensor | None = None):
-        if env_ids is None:
-            env_ids = torch.arange(self.num_envs)
-        self.target_sequence[env_ids] = torch.randint(high=self.handhold_pos.shape[1], size=(self.num_envs, self.cfg.num_targets), device=self.device)[env_ids]
-
-
-    def _generate_fix_target_idx(self, env_ids: torch.Tensor | None = None):
-        if env_ids is None:
-            env_ids = torch.arange(self.num_envs)
-        self.target_sequence[env_ids] = torch.arange(len(self.cfg.handhold_pos), device=self.device).repeat((self.num_envs, 1))[env_ids]
+    def generate_foot_steps(self):
+        
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
@@ -82,10 +75,6 @@ class AllstepsEnv(DirectRLEnv):
                 ),
             ),
         )
-        ## add anchor
-        self.anchor = RigidObject(self.cfg.anchor)
-        ## add handholds
-        # self.handholds = RigidObjectCollection(self.cfg.handholds)
         # clone and replicate
         self.scene.clone_environments(copy_from_source=False)
         # add articulation to scene
@@ -94,48 +83,23 @@ class AllstepsEnv(DirectRLEnv):
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
         # create marker
-        self.marker = VisualizationMarkers(self.cfg.handhold_markers)
+        # self.marker = VisualizationMarkers(self.cfg.handhold_markers)
         
 
     def _pre_physics_step(self, actions: torch.Tensor):
         self.actions = actions.clone()
-
-        # Last action is grab if > 0, release if < 0. Now only for left hand.
-        self.actions_grab = self.actions[:, -1]
-        self.actions_joints = self.actions[:, :-1]
-
-        self._grab_or_release()
-
-        already_grabbed_idx = self.d6_env_ids.nonzero(as_tuple=False).flatten() # this gives the env idx
-        marker_offset = self.target_sequence[torch.arange(self.num_envs), self.current_target_idx] # (num_envs)
-        self.marker_idx.fill_(0)
-        if len(already_grabbed_idx) > 0:
-            self.marker_idx.view(self.num_envs, 3)[already_grabbed_idx, marker_offset[already_grabbed_idx]] = 1
-        self.marker.visualize(translations=self.handhold_pos.view(-1, 3), marker_indices=self.marker_idx)
         
     def _apply_action(self):
-        if self.cfg.pd_control:
-            # PD controller
-            target = self.action_offset + self.action_scale * self.actions_joints
-            self.robot.set_joint_position_target(target)
-        else:
         # Torque controller
-            forces = self.force_scale * self.joint_gears * self.actions_joints
-            self.robot.set_joint_effort_target(forces)
+        forces = self.force_scale * self.joint_gears * self.actions
+        self.robot.set_joint_effort_target(forces)
 
     def _compute_useful_values(self):
-        # hard code position of interests now, could be turned into a loop later. A bit ugly now.
-        ####### Debugging #######
-        # print(self.robot.data.root_pos_w[:, 2])
-        # print(self.current_target_idx)
-        # print(self.grab_conditions)
-        #########################
-        
         self.left_wrist_pos_w = self.robot.data.body_pos_w[:, self.key_body_indexes[LimbNames.LeftHand.value]]
         self.right_wrist_pos_w = self.robot.data.body_pos_w[:, self.key_body_indexes[LimbNames.RightHand.value]]
         self.left_toe_pos_w = self.robot.data.body_pos_w[:, self.key_body_indexes[LimbNames.LeftFoot.value]]
         self.right_toe_pos_w = self.robot.data.body_pos_w[:, self.key_body_indexes[LimbNames.RightFoot.value]]
-        self.chest_pos_w = self.robot.data.body_pos_w[:, self.chest_index]
+        self.chest_pos_w = self.robot.data.body_pos_w[:, self.torso_index]
         
         self.lower_foot_z_w = torch.min(self.left_toe_pos_w[:, 2], self.right_toe_pos_w[:, 2])
 
@@ -239,31 +203,16 @@ class AllstepsEnv(DirectRLEnv):
         # A small reward for reaching target
         progress = self.potentials - self.old_potentials
         
-        # Reward for holding it
-        hold_reward = torch.where(self.hold_counter > self.hold_counter_old, torch.ones_like(self.hold_counter), torch.zeros_like(self.hold_counter))
         
         # total reward
         total_reward = (
             alive_reward
             + progress
-            + hold_reward
         )
         
         # adjust reward for falling
         total_reward = torch.where(self.reset_terminated, self.cfg.death_cost * torch.ones_like(total_reward), total_reward)
         
-        if self.num_envs < 1:
-            for i in range(self.num_envs):
-                print(f"Env: {i} ---------------------------------")
-                print(f"Reward: {total_reward[i].item()}")
-                print(f"Alive Reward: {alive_reward[i].item()}")
-                print(f"Progress Reward: {progress[i].item()}")
-                print(f"Hold Reward: {hold_reward[i].item()}")
-                print(f"Hold Counter: {self.hold_counter[i].item()}")
-                print(f"Old Hold Counter: {self.hold_counter_old[i].item()}")
-                print(f"Current Index: {self.current_target_idx[i].item()}")
-                print(f"Current Target: {self.target_sequence[i, self.current_target_idx[i].item()]}")
-                print("--------------------------------------------")
         return total_reward
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -297,18 +246,5 @@ class AllstepsEnv(DirectRLEnv):
         self.robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
         self.robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
-
-        self.current_target_idx[env_ids] = 0
-        if self.random_target:
-            self._generate_random_target_idx(env_ids)
-        else:
-            self._generate_fix_target_idx(env_ids)
         
         self._compute_useful_values()
-
-@torch.jit.script
-def clamp_index(index: torch.Tensor, min_index: int, max_index: int) -> torch.Tensor:
-    min_index_tensor = torch.ones_like(index) * min_index
-    max_index_tensor = torch.ones_like(index) * max_index
-
-    return torch.where( index > max_index_tensor, max_index_tensor, torch.where(index < min_index_tensor, min_index_tensor, index))

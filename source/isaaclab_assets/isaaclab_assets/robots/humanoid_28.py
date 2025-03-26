@@ -35,7 +35,7 @@ HUMANOID_28_CFG = ArticulationCfg(
         copy_from_source=False,
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.8),
+        pos=(0.0, 0.0, 0.0),
         joint_pos={".*": 0.0},
     ),
     actuators={

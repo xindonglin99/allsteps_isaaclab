@@ -33,6 +33,9 @@ class AllstepsEnv(DirectRLEnv):
         self.pitch_range = torch.tensor([-30, 30], dtype=torch.float32, device=self.device)
         self.yaw_range = torch.tensor([-20, 20], dtype=torch.float32, device=self.device)
         self.tilt_range = torch.tensor([-15, 15], dtype=torch.float32, device=self.device)
+        self.curriculum = 0
+        self.max_curriculum = 9
+        self.num_steps = 20
         self.terrain_info = self.generate_foot_steps()
 
         # action offset and scale for PD controller
@@ -60,7 +63,50 @@ class AllstepsEnv(DirectRLEnv):
     
         
     def generate_foot_steps(self):
-        
+        self.curriculum = min(self.curriculum, self.max_curriculum) # check overflow
+        ratio = self.curriculum / self.max_curriculum # progress is 0 now
+
+        # {self.max_curriculum + 1} levels in total
+        dist_upper = np.linspace(*self.dist_range, self.max_curriculum + 1) # divide the upper bounds to 10 levels
+        dist_range = np.array([self.dist_range[0], dist_upper[self.curriculum]])
+        yaw_range = self.yaw_range * DEG2RAD * 0.7
+        pitch_range = self.pitch_range * ratio * DEG2RAD + np.pi / 2
+        tilt_range = self.tilt_range * ratio * DEG2RAD
+
+        N = self.num_steps
+        dr = np.random.uniform(*dist_range, size=N)
+        dphi = np.random.uniform(*yaw_range, size=N)
+        dtheta = np.random.uniform(*pitch_range, size=N)
+        x_tilt = np.random.uniform(*tilt_range, size=N)
+        y_tilt = np.random.uniform(*tilt_range, size=N)
+
+        # make first step below feet
+        dr[0] = 0.0
+        dphi[0] = 0.0
+        dtheta[0] = np.pi / 2
+
+        dr[1:3] = self.init_step_separation
+        dphi[1:3] = 0.0
+        dtheta[1:3] = np.pi / 2
+
+        x_tilt[0:3] = 0
+        y_tilt[0:3] = 0
+
+        dphi = np.cumsum(dphi)
+
+        dx = dr * np.sin(dtheta) * np.cos(dphi)
+        dy = dr * np.sin(dtheta) * np.sin(dphi)
+        dz = dr * np.cos(dtheta)
+
+        # Fix overlapping steps
+        dx_max = np.maximum(np.abs(dx[2:]), self.step_radius * 2.5)
+        dx[2:] = np.sign(dx[2:]) * np.minimum(dx_max, self.dist_range[1])
+
+        x = np.cumsum(dx)
+        y = np.cumsum(dy)
+        z = np.cumsum(dz)
+
+        return torch.from_numpy(np.stack((x, y, z, dphi, x_tilt, y_tilt), axis=1)).to(self.device)
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)

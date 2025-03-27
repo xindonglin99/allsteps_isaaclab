@@ -30,7 +30,7 @@ class Allsteps():
     # {self.max_curriculum + 1} levels in total
     dist_upper = np.linspace(*self.dist_range, self.max_curriculum + 1)
     dist_range = np.array([self.dist_range[0], dist_upper[self.curriculum]])
-    yaw_range = self.yaw_range * ratio * DEG2RAD
+    yaw_range = self.yaw_range * 0.7 * DEG2RAD
     pitch_range = self.pitch_range * ratio * DEG2RAD + np.pi / 2
     tilt_range = self.tilt_range * ratio * DEG2RAD
 

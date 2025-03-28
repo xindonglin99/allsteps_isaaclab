@@ -8,6 +8,7 @@ from isaaclab.sim import SimulationCfg
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 from isaaclab.markers import VisualizationMarkersCfg
+from isaaclab.sensors import ContactSensorCfg
 
 from isaaclab_assets import WALKER_CFG, HUMANOID_28_CFG, HUMANOID_CFG
 
@@ -41,7 +42,29 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
 
     # robot
-    robot: ArticulationCfg = HUMANOID_28_CFG.replace(prim_path="/World/envs/env_.*/Robot")
+    robot: ArticulationCfg = HUMANOID_28_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+
+    step_radius: float = 0.25
+
+    # foot step markers
+    step_markers: VisualizationMarkersCfg = VisualizationMarkersCfg(
+        prim_path="/World/Visuals/stepMarkers",
+        markers={
+            "marker1": sim_utils.SphereCfg(
+                radius=step_radius,
+                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0)),
+            ),
+            "marker2": sim_utils.SphereCfg(
+                radius=step_radius,
+                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.0, 1.0)),
+            ),
+        }
+    )
+
+    # foot contact sensors
+    foot_contacts: ContactSensorCfg = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/.*_foot", update_period=0.0, history_length=4, debug_vis=True
+    )
     
     # joint_gears: list = [
     #     60, # abdomen_z
@@ -136,7 +159,7 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
 
     death_cost: float = -1.0
     termination_height: float = 0.7
-    termination_height_chest_to_feet: float = 0.5
+    termination_height_torso_to_feet: float = 0.5
 
     angular_velocity_scale: float = 0.25
 

@@ -11,7 +11,7 @@ class Allsteps():
   init_step_separation = 0.75
 
   def __init__(self):
-    self.dist_range = np.array([0.65, 1.25])
+    self.dist_range = np.array([0.75, 1.25])
     self.pitch_range = np.array([-30, +30])  # degrees
     self.yaw_range = np.array([-20, 20])
     self.tilt_range = np.array([-15, 15])
@@ -63,9 +63,14 @@ class Allsteps():
     dx_max = np.maximum(np.abs(dx[2:]), self.step_radius * 2.5)
     dx[2:] = np.sign(dx[2:]) * np.minimum(dx_max, self.dist_range[1])
 
-    x = np.cumsum(dx)
+    num_envs = 16
+
+
+    x = np.cumsum(dx) 
     y = np.cumsum(dy)
-    z = np.cumsum(dz)
+    z = np.cumsum(dz) 
+
+    z[:] = 0 # set vertical to be 0 for now
 
     return np.stack((x, y, z, dphi, x_tilt, y_tilt), axis=1)
   

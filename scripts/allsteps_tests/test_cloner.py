@@ -21,6 +21,7 @@ import torch
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
+from isaaclab.sensors import ContactSensorCfg
 from isaaclab.sim import SimulationContext
 from isaaclab.utils import configclass
 
@@ -44,6 +45,12 @@ class WalkerSceneCfg(InteractiveSceneCfg):
 
     # articulation
     walker: ArticulationCfg = HUMANOID_28_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    walker.spawn.activate_contact_sensors = True
+
+    # foot contact sensors
+    foot_contacts: ContactSensorCfg = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/.*_foot", update_period=0.0, history_length=4, debug_vis=True
+    )
 
 
 def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):

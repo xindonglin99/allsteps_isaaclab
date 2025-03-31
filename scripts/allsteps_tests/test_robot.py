@@ -33,7 +33,7 @@ def design_scene():
     cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.8, 0.8, 0.8))
     cfg.func("/World/Light", cfg)
     
-    HUMANOID_28_CFG.spawn.rigid_props.disable_gravity = True
+    # HUMANOID_28_CFG.spawn.rigid_props.disable_gravity = True
     robot = Articulation(cfg=HUMANOID_28_CFG.replace(prim_path="/World/Robot"))
 
     # return the scene information

@@ -4,7 +4,7 @@ from isaaclab.app import AppLauncher
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Tutorial on using the interactive scene interface.")
-parser.add_argument("--num_envs", type=int, default=16, help="Number of environments to spawn.")
+parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to spawn.")
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
@@ -84,11 +84,12 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             print("[INFO]: Resetting robot state...")
         # Apply random action
         # -- generate random joint efforts
-        efforts = torch.randn_like(robot.data.joint_pos) * 5.0
-        # -- apply action to the robot
-        robot.set_joint_effort_target(efforts)
+        # efforts = torch.randn_like(robot.data.joint_pos) * 5.0
+        # # -- apply action to the robot
+        # robot.set_joint_effort_target(efforts)
         # -- write data to sim
         scene.write_data_to_sim()
+        print(torch.norm(scene.sensors["foot_contacts"].data.net_forces_w, dim=-1) > 1e-4)
         # Perform step
         sim.step()
         # Increment counter

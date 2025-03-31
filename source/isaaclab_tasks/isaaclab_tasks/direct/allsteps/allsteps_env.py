@@ -26,6 +26,8 @@ RAD2DEG = 180 / np.pi
 RIGHT_FOOT = 0
 LEFT_FOOT = 1
 
+EPSILON = 1e-4
+
 class AllstepsEnv(DirectRLEnv):
     cfg: AllstepsEnvCfg
 
@@ -42,16 +44,24 @@ class AllstepsEnv(DirectRLEnv):
         self.num_steps = 20
         self.init_step_separation = 0.75
         self.step_radius = self.cfg.step_radius
-        self.steps_pos, self.steps_dphi = self.generate_foot_steps() # (num_steps, 3), (num_steps,)
-        self.steps_pos = self.steps_pos + self.scene.env_origins.unsqueeze(1) # (num_envs, num_steps, 3)
+        self.target_dim = 3
+        
+        # pre allocate foot steps
+        self.steps_pos = torch.zeros((self.num_envs, self.num_steps, 3), dtype=torch.float32, device=self.device)
+        self.steps_dphi = torch.zeros((self.num_envs, self.num_steps), dtype=torch.float32, device=self.device)
+        self.targets_b = torch.zeros((self.num_envs, self.look_ahead + self.look_behind, self.target_dim), dtype=torch.float32, device=self.device)
+        self._generate_foot_steps_torch()
+        
         self.steps_dphi = self.steps_dphi.repeat(self.num_envs, 1)
         self.look_ahead = 2
         self.look_behind = 1
 
-        self.swing_leg = RIGHT_FOOT
+        self.swing_leg = torch.ones(self.num_envs, dtype=torch.int64, device=self.device) # Right leg to start with
         self.curr_target_index = self.look_behind
         self.prev_target_index = self.look_behind - 1
         self.next_target_index = self.look_behind + 1
+        self.target_reach_count = torch.zeros(self.num_envs, dtype=torch.int64, device=self.device)
+        self.target_reach_count_threshold = 120 # 2 seconds -> 60hz control step
 
         # action offset and scale for PD controller
         dof_lower_limits = self.robot.data.joint_limits[0, :, 0]
@@ -76,8 +86,19 @@ class AllstepsEnv(DirectRLEnv):
         self.marker_idx = torch.zeros((self.num_envs * self.num_steps), dtype=torch.int64, device=self.device)
         self.marker.visualize(translations=self.steps_pos.view(-1, 3), marker_indices=self.marker_idx)
     
+    def _generate_foot_steps_torch(self, env_ids: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+        temp_steps_pos, temp_steps_dphi = self.generate_foot_steps_np()
+        temp_steps_pos = temp_steps_pos + self.scene.env_origins.unsqueeze(1) # (num_envs, num_steps, 3)
+        temp_steps_dphi = temp_steps_dphi.repeat(self.num_envs, 1)
         
-    def generate_foot_steps(self):
+        if len(env_ids) > 0:
+            self.steps_pos[env_ids] = temp_steps_pos[env_ids]
+            self.steps_dphi[env_ids] = temp_steps_dphi[env_ids]
+        else:
+            self.steps_pos = temp_steps_pos
+            self.steps_dphi = temp_steps_dphi
+        
+    def generate_foot_steps_np(self) -> tuple[torch.Tensor, torch.Tensor]:
         self.curriculum = min(self.curriculum, self.max_curriculum)
         ratio = self.curriculum / self.max_curriculum
 
@@ -190,11 +211,17 @@ class AllstepsEnv(DirectRLEnv):
         self.root_vec_b = quat_rotate_inverse(self.robot.data.root_quat_w, self.robot.data.root_lin_vel_w)
 
         self.root_ang_vec_b = quat_rotate_inverse(self.robot.data.root_quat_w, self.robot.data.root_ang_vel_w)
+        
+        # calculate targets
+        targets_w = self._calculate_targets()
+        self.targets_b = subtract_frame_transforms(
+            t01=self.robot.data.root_pos_w,
+            q01=self.robot.data.root_quat_w,
+            t02=targets_w.view(-1, 3)
+        )[0].view(self.num_envs, -1, 3)
 
         # update potentials
-        limb_to_target = self.robot.data.body_pos_w[:, self.foot_indices[LimbNames.LeftHand.value]] - self.handhold_pos[torch.arange(self.num_envs), self.target_sequence[torch.arange(self.num_envs), self.current_target_idx]]
-        self.old_potentials = self.potentials.clone()
-        self.potentials = - torch.linalg.vector_norm(limb_to_target, dim=-1) / self.step_dt
+        self._calculate_body_potentials()
 
     def _get_observations(self) -> dict:
         # build task observation
@@ -253,20 +280,62 @@ class AllstepsEnv(DirectRLEnv):
         return died | fell, time_out
     
     def _calculate_body_potentials(self):
-        pass
-
-    def _calculate_foot_state(self):
-        foot_forces = self.sensor.data.net_forces_w
+        walk_target_delta = self.targets_b[:, -1] - self.robot.data.root_pos_w
+        self.body_dist_to_target_xy = torch.linalg.vector_norm(walk_target_delta[:, 0:2], dim=-1)
         
-
+        self.old_potentials = self.potentials.clone()
+        self.potentials = -self.body_dist_to_target_xy / self.step_dt
+        
+    def _calculate_foot_state(self):
+        '''Calculate the foot state and update the target index.
+        '''
+        contact_forces = torch.norm(self.sensor.data.net_forces_w, dim=-1) # (N, B)
+        binary_contact = contact_forces > EPSILON # (N, B)
+        # XY distance
+        self.foot_to_target_dist = torch.linalg.vector_norm(
+            self.robot.data.body_pos_w[:, self.foot_indices, 0:2] - self.steps_pos[:, self.curr_target_index, 0:2]
+            , dim=-1)
+        
+        self.target_reached = binary_contact[torch.arange(self.num_envs), self.swing_leg] > 0
+        
+        self.target_reach_count[self.target_reached] += 1
+        
+        can_progress = self.target_reach_count >= 2
+        self.swing_leg[can_progress] = self.swing_leg[can_progress] ^ 1 # flip the leg
+        self.curr_target_index[can_progress] = clamp_index(
+            self.curr_target_index[can_progress] + 1,
+            0,
+            self.num_steps - 1,
+        )
+        self.target_reach_count[can_progress] = 0
+        
+    def _calculate_targets(self) -> torch.Tensor:
+        k = self.look_ahead
+        j = self.look_behind
+        
+        
+        
+        return
+        
     def _reset_idx(self, env_ids: torch.Tensor | None):
         if env_ids is None or len(env_ids) == self.num_envs:
             env_ids = self.robot._ALL_INDICES
         self.robot.reset(env_ids)
         super()._reset_idx(env_ids)
         
-        self.old_potentials[env_ids] = 0
-        self.potentials[env_ids] = 0
+        over_half_ids = (self.curr_target_index > self.num_steps // 2).nonzero(as_tuple=False).flatten()
+        replace_ids = env_ids[torch.isin(env_ids, over_half_ids)]
+        
+        self.old_potentials[env_ids] = 0.0
+        self.potentials[env_ids] = 0.0
+        
+        self.target_reach_count[env_ids] = 0
+        self.curr_target_index[env_ids] = self.look_behind
+        self.prev_target_index[env_ids] = self.curr_target_index[env_ids] - 1
+        
+        if len(replace_ids) > 0:
+            self._generate_foot_steps_torch(replace_ids)
+        self._calculate_foot_state() # here we still update state for every env
 
         # Reset to a fixed pose for now
         joint_pos = self.robot.data.default_joint_pos[env_ids]
@@ -278,4 +347,20 @@ class AllstepsEnv(DirectRLEnv):
         self.robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
         
-        self._compute_useful_values()
+        self._compute_useful_values() # here we still update state for every env
+        
+        
+@torch.jit.script
+def clamp_index(index: torch.Tensor, min_index: int, max_index: int) -> torch.Tensor:
+    """Clamp the index to be within the range [min_index, max_index].
+    Args:
+        index (torch.Tensor): The index to clamp.
+        min_index (int): The minimum index.
+        max_index (int): The maximum index.
+    Returns:
+        torch.Tensor: The clamped index.
+    """
+    min_index_tensor = torch.ones_like(index) * min_index
+    max_index_tensor = torch.ones_like(index) * max_index
+
+    return torch.where( index > max_index_tensor, max_index_tensor, torch.where(index < min_index_tensor, min_index_tensor, index))

@@ -49,6 +49,7 @@ class AllstepsEnv(DirectRLEnv):
         # pre allocate foot steps
         self.steps_pos = torch.zeros((self.num_envs, self.num_steps, 3), dtype=torch.float32, device=self.device)
         self.steps_dphi = torch.zeros((self.num_envs, self.num_steps), dtype=torch.float32, device=self.device)
+        self.targets_w = torch.zeros((self.num_envs, self.look_ahead + self.look_behind, self.target_dim), dtype=torch.float32, device=self.device)
         self.targets_b = torch.zeros((self.num_envs, self.look_ahead + self.look_behind, self.target_dim), dtype=torch.float32, device=self.device)
         self._generate_foot_steps_torch()
         
@@ -56,12 +57,14 @@ class AllstepsEnv(DirectRLEnv):
         self.look_ahead = 2
         self.look_behind = 1
 
+        # pre allocate buffers
         self.swing_leg = torch.ones(self.num_envs, dtype=torch.int64, device=self.device) # Right leg to start with
-        self.curr_target_index = self.look_behind
-        self.prev_target_index = self.look_behind - 1
-        self.next_target_index = self.look_behind + 1
+        self.curr_target_index = torch.ones(self.num_envs, dtype=torch.int64, device=self.device) # 1
+        self.prev_target_index = self.curr_target_index - 1
+        self.next_target_index = torch.clamp(self.curr_target_index + 1, 0, self.num_steps - 1)
         self.target_reach_count = torch.zeros(self.num_envs, dtype=torch.int64, device=self.device)
         self.target_reach_count_threshold = 120 # 2 seconds -> 60hz control step
+        self.foot_contact = torch.zeros((self.num_envs, 2), dtype=torch.float32, device=self.device) # (N, B)
 
         # action offset and scale for PD controller
         dof_lower_limits = self.robot.data.joint_limits[0, :, 0]
@@ -102,7 +105,6 @@ class AllstepsEnv(DirectRLEnv):
         self.curriculum = min(self.curriculum, self.max_curriculum)
         ratio = self.curriculum / self.max_curriculum
 
-        # {self.max_curriculum + 1} levels in total
         dist_upper = np.linspace(*self.dist_range, self.max_curriculum + 1)
         dist_range = np.array([self.dist_range[0], dist_upper[self.curriculum]])
         yaw_range = self.yaw_range * 0.7 * DEG2RAD
@@ -189,18 +191,6 @@ class AllstepsEnv(DirectRLEnv):
         self.torso_to_feet_height = self.torso_pos_w[:, 2] - self.lower_foot_z_w
 
         self.roll, self.pitch, self.yaw = euler_xyz_from_quat(self.robot.data.root_quat_w)
-
-        self.left_toe_pos_b = subtract_frame_transforms(
-            t01=self.robot.data.root_pos_w,
-            q01=self.robot.data.root_quat_w,
-            t02=self.left_foot_pos_w
-        )[0]
-
-        self.right_toe_pos_b = subtract_frame_transforms(
-            t01=self.robot.data.root_pos_w,
-            q01=self.robot.data.root_quat_w,
-            t02=self.right_foot_pos_w
-        )[0]
         
         self.joint_pos_scaled = scale_transform(
             self.robot.data.joint_pos,
@@ -212,12 +202,15 @@ class AllstepsEnv(DirectRLEnv):
 
         self.root_ang_vec_b = quat_rotate_inverse(self.robot.data.root_quat_w, self.robot.data.root_ang_vel_w)
         
+        # compute foot states
+        self._calculate_foot_state() # here we still update state for every env
+        
         # calculate targets
-        targets_w = self._calculate_targets()
+        self._calculate_targets()
         self.targets_b = subtract_frame_transforms(
             t01=self.robot.data.root_pos_w,
             q01=self.robot.data.root_quat_w,
-            t02=targets_w.view(-1, 3)
+            t02=self.targets_w.view(-1, 3)
         )[0].view(self.num_envs, -1, 3)
 
         # update potentials
@@ -228,22 +221,13 @@ class AllstepsEnv(DirectRLEnv):
         obs = torch.cat(
             (
                 self.torso_to_feet_height.unsqueeze(-1), # 1
-                self.robot.data.root_pos_w[:, 2].unsqueeze(-1), # 1
                 self.roll.unsqueeze(-1), # 1
                 self.pitch.unsqueeze(-1), # 1
-                self.yaw.unsqueeze(-1), # 1
                 self.root_vec_b, # 3
-                self.root_ang_vec_b * self.cfg.angular_velocity_scale, # 3
                 self.joint_pos_scaled, # 28
-                self.robot.data.joint_vel * self.cfg.dof_vel_scale, # 28
-                # self.actions, # 29
-                # self.left_toe_pos_b, # 3
-                # self.right_toe_pos_b, # 3
-                self.left_wrist_pos_b, # 3
-                # self.right_wrist_pos_b, # 3
-                self.current_target_pos_b, # 3
-                # self.next_target_pos_b, # 3
-                # self.next_2nd_target_pos_b, # 3
+                torch.clamp(self.robot.data.joint_vel * self.cfg.dof_vel_scale, -5, 5), # 28
+                self.foot_contact, # 2
+                self.targets_b.view(self.num_envs, -1) # 3 * 3 = 9
             ), 
             dim=-1
         )
@@ -258,11 +242,40 @@ class AllstepsEnv(DirectRLEnv):
         # A small reward for reaching target
         progress = self.potentials - self.old_potentials
         
+        # Some regularization terms 
+        roll_violation = (self.roll > 0.4) | (self.roll < -0.2)
+        pitch_violation = (self.pitch > 0.4) | (self.pitch < -0.4)
+        roll_cost = torch.where(roll_violation, self.roll.abs(), torch.zeros_like(self.roll))
+        pitch_cost = torch.where(pitch_violation, self.pitch.abs(), torch.zeros_like(self.pitch))
+        
+        speed = torch.linalg.vector_norm(self.robot.data.root_lin_vel_w, dim=-1)
+        speed_cost = torch.where(speed > 1.6, speed - 1.6, torch.zeros_like(speed))
+        
+        action_cost = self.cfg.actions_cost_scale * torch.linalg.vector_norm(self.actions, dim=-1)
+        energy_cost = self.cfg.energy_cost_scale * torch.sum(torch.abs(self.cfg.dof_vel_scale * self.robot.data.joint_vel * self.actions), dim=-1)
+
+        joint_at_limit_cost = torch.count_nonzero(torch.abs(self.joint_pos_scaled) > 0.98, dim=-1).float() * self.cfg.joint_at_limit_cost_scale
+        
+        # Step reward to encourage the foot to step on the center of the target
+        step_reward_condition = self.target_reached and self.target_reach_count == 1 and self.curr_target_index < self.num_steps - 1
+        dist = self.foot_to_target_dist_xy[torch.arange(self.num_envs), self.swing_leg]
+        step_reward = torch.where(step_reward_condition, 50 * torch.exp( -dist / 0.25), torch.zeros_like(step_reward_condition))
+        
+        target_bonus_condition = self.curr_target_index == self.num_steps - 1 and self.body_dist_to_target_xy < 0.15
+        target_bonus = torch.where(target_bonus_condition, torch.ones_like(target_bonus_condition), torch.zeros_like(target_bonus_condition))
         
         # total reward
         total_reward = (
             alive_reward
             + progress
+            - roll_cost
+            - pitch_cost
+            - speed_cost
+            - energy_cost
+            - action_cost
+            - joint_at_limit_cost
+            + step_reward
+            + target_bonus
         )
         
         # adjust reward for falling
@@ -280,7 +293,7 @@ class AllstepsEnv(DirectRLEnv):
         return died | fell, time_out
     
     def _calculate_body_potentials(self):
-        walk_target_delta = self.targets_b[:, -1] - self.robot.data.root_pos_w
+        walk_target_delta = self.targets_w[:, -1] - self.robot.data.root_pos_w
         self.body_dist_to_target_xy = torch.linalg.vector_norm(walk_target_delta[:, 0:2], dim=-1)
         
         self.old_potentials = self.potentials.clone()
@@ -289,12 +302,14 @@ class AllstepsEnv(DirectRLEnv):
     def _calculate_foot_state(self):
         '''Calculate the foot state and update the target index.
         '''
-        contact_forces = torch.norm(self.sensor.data.net_forces_w, dim=-1) # (N, B)
+        contact_forces = torch.linalg.vector_norm(self.sensor.data.net_forces_w, dim=-1) # (N, B)
         binary_contact = contact_forces > EPSILON # (N, B)
+        self.foot_contact[:] = binary_contact.float()
+        
         # XY distance
-        self.foot_to_target_dist = torch.linalg.vector_norm(
-            self.robot.data.body_pos_w[:, self.foot_indices, 0:2] - self.steps_pos[:, self.curr_target_index, 0:2]
-            , dim=-1)
+        target_pos_xy = self.steps_pos[torch.arange(self.num_envs), self.curr_target_index, :2] # (N, 2)
+        foot_pos_xy = self.robot.data.body_pos_w[:, self.foot_indices, :2] # (N, 2, 2)
+        self.foot_to_target_dist_xy = torch.linalg.vector_norm(foot_pos_xy - target_pos_xy[:, None, :], dim=-1)
         
         self.target_reached = binary_contact[torch.arange(self.num_envs), self.swing_leg] > 0
         
@@ -302,7 +317,20 @@ class AllstepsEnv(DirectRLEnv):
         
         can_progress = self.target_reach_count >= 2
         self.swing_leg[can_progress] = self.swing_leg[can_progress] ^ 1 # flip the leg
-        self.curr_target_index[can_progress] = clamp_index(
+            
+        self.curr_target_index[can_progress] = torch.clamp(
+            self.curr_target_index[can_progress] + 1,
+            0,
+            self.num_steps - 1,
+        )
+        
+        self.prev_target_index[can_progress] = torch.clamp(
+            self.curr_target_index[can_progress] - 1,
+            0,
+            self.num_steps - 1,
+        )
+        
+        self.next_target_index[can_progress] = torch.clamp(
             self.curr_target_index[can_progress] + 1,
             0,
             self.num_steps - 1,
@@ -310,12 +338,18 @@ class AllstepsEnv(DirectRLEnv):
         self.target_reach_count[can_progress] = 0
         
     def _calculate_targets(self) -> torch.Tensor:
-        k = self.look_ahead
-        j = self.look_behind
+        N, _, _ = self.targets_w.shape
         
+        prev_target_index = torch.clamp(self.prev_target_index - 1, 0, self.num_steps - 1)
+        current_target_index = torch.clamp(self.curr_target_index - 1, 0, self.num_steps - 1)
+        next_target_index = torch.clamp(self.next_target_index - 1, 0, self.num_steps - 1)
         
+        prev_target_pos = self.steps_pos[torch.arange(N), prev_target_index]
+        current_target_pos = self.steps_pos[torch.arange(N), current_target_index]
+        next_target_pos = self.steps_pos[torch.arange(N), next_target_index]
         
-        return
+        result = torch.stack([prev_target_pos, current_target_pos, next_target_pos], dim=1)
+        self.targets_w[:] = result
         
     def _reset_idx(self, env_ids: torch.Tensor | None):
         if env_ids is None or len(env_ids) == self.num_envs:
@@ -323,21 +357,22 @@ class AllstepsEnv(DirectRLEnv):
         self.robot.reset(env_ids)
         super()._reset_idx(env_ids)
         
-        over_half_ids = (self.curr_target_index > self.num_steps // 2).nonzero(as_tuple=False).flatten()
-        replace_ids = env_ids[torch.isin(env_ids, over_half_ids)]
-        
+        # put potentials to zero first, later we will update them in _compute_useful_values
         self.old_potentials[env_ids] = 0.0
         self.potentials[env_ids] = 0.0
         
         self.target_reach_count[env_ids] = 0
-        self.curr_target_index[env_ids] = self.look_behind
-        self.prev_target_index[env_ids] = self.curr_target_index[env_ids] - 1
+        self.curr_target_index[env_ids] = self.look_behind # 1
+        self.prev_target_index[env_ids] = torch.clamp(self.curr_target_index[env_ids] - 1, 0, self.num_steps - 1)
+        self.next_target_index[env_ids] = torch.clamp(self.curr_target_index[env_ids] + 1, 0, self.num_steps - 1)
         
+        # if we progress over half of the steps, we need to generate new foot steps
+        over_half_ids = (self.curr_target_index > self.num_steps // 2).nonzero(as_tuple=False).flatten()
+        replace_ids = env_ids[torch.isin(env_ids, over_half_ids)]
         if len(replace_ids) > 0:
             self._generate_foot_steps_torch(replace_ids)
-        self._calculate_foot_state() # here we still update state for every env
-
-        # Reset to a fixed pose for now
+        
+        # Reset to a fixed pose for now TODO: add randomization
         joint_pos = self.robot.data.default_joint_pos[env_ids]
         joint_vel = self.robot.data.default_joint_vel[env_ids]
         default_root_state = self.robot.data.default_root_state[env_ids]
@@ -348,19 +383,3 @@ class AllstepsEnv(DirectRLEnv):
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
         
         self._compute_useful_values() # here we still update state for every env
-        
-        
-@torch.jit.script
-def clamp_index(index: torch.Tensor, min_index: int, max_index: int) -> torch.Tensor:
-    """Clamp the index to be within the range [min_index, max_index].
-    Args:
-        index (torch.Tensor): The index to clamp.
-        min_index (int): The minimum index.
-        max_index (int): The maximum index.
-    Returns:
-        torch.Tensor: The clamped index.
-    """
-    min_index_tensor = torch.ones_like(index) * min_index
-    max_index_tensor = torch.ones_like(index) * max_index
-
-    return torch.where( index > max_index_tensor, max_index_tensor, torch.where(index < min_index_tensor, min_index_tensor, index))

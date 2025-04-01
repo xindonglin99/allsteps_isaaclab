@@ -18,8 +18,8 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     episode_length_s = 15.0
     decimation = 4
     action_scale = 1.0
-    action_space = 21
-    observation_space = 117 - 3 - 29 - 3 * 4
+    action_space = 28
+    observation_space = 73
     state_space = 0
 
     # simulation
@@ -152,10 +152,11 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     heading_weight: float = 0.5
     up_weight: float = 0.1
 
-    energy_cost_scale: float = 0.05
+    energy_cost_scale: float = 0.214
     actions_cost_scale: float = 0.01
     alive_reward_scale: float = 2.0
     dof_vel_scale: float = 0.1
+    joint_at_limit_cost_scale: float = 0.1
 
     death_cost: float = -1.0
     termination_height: float = 0.7

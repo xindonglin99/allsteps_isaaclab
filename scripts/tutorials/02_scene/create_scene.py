@@ -44,7 +44,7 @@ from isaaclab.utils import configclass
 ##
 # Pre-defined configs
 ##
-from isaaclab_assets import CARTPOLE_CFG  # isort:skip
+from isaaclab_assets import CARTPOLE_CFG, HUMANOID_CFG, ANT_CFG, HUMANOID_28_CFG, WALKER_CFG  # isort:skip
 
 
 @configclass
@@ -60,7 +60,7 @@ class CartpoleSceneCfg(InteractiveSceneCfg):
     )
 
     # articulation
-    cartpole: ArticulationCfg = CARTPOLE_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    cartpole: ArticulationCfg = HUMANOID_28_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
 
 
 def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):

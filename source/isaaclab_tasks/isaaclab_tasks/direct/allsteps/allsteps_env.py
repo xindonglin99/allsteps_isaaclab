@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import gymnasium as gym
-import numpy as np
 import torch
 
 import isaaclab.sim as sim_utils
@@ -19,9 +18,6 @@ from isaaclab.sensors import ContactSensor
 
 from isaaclab.envs import DirectRLEnv
 from .allsteps_env_cfg import AllstepsEnvCfg
-
-DEG2RAD = np.pi / 180
-RAD2DEG = 180 / np.pi
 
 RIGHT_FOOT = 0
 LEFT_FOOT = 1
@@ -46,16 +42,17 @@ class AllstepsEnv(DirectRLEnv):
         self.step_radius = self.cfg.step_radius
         self.target_dim = 3
         
+        self.look_ahead = 2
+        self.look_behind = 1
+        
         # pre allocate foot steps
         self.steps_pos = torch.zeros((self.num_envs, self.num_steps, 3), dtype=torch.float32, device=self.device)
         self.steps_dphi = torch.zeros((self.num_envs, self.num_steps), dtype=torch.float32, device=self.device)
         self.targets_w = torch.zeros((self.num_envs, self.look_ahead + self.look_behind, self.target_dim), dtype=torch.float32, device=self.device)
         self.targets_b = torch.zeros((self.num_envs, self.look_ahead + self.look_behind, self.target_dim), dtype=torch.float32, device=self.device)
-        self._generate_foot_steps_torch()
+        self._generate_foot_steps()
         
         self.steps_dphi = self.steps_dphi.repeat(self.num_envs, 1)
-        self.look_ahead = 2
-        self.look_behind = 1
 
         # pre allocate buffers
         self.swing_leg = torch.ones(self.num_envs, dtype=torch.int64, device=self.device) # Right leg to start with
@@ -67,8 +64,8 @@ class AllstepsEnv(DirectRLEnv):
         self.foot_contact = torch.zeros((self.num_envs, 2), dtype=torch.float32, device=self.device) # (N, B)
 
         # action offset and scale for PD controller
-        dof_lower_limits = self.robot.data.joint_limits[0, :, 0]
-        dof_upper_limits = self.robot.data.joint_limits[0, :, 1]
+        dof_lower_limits = self.robot.data.joint_pos_limits[0, :, 0]
+        dof_upper_limits = self.robot.data.joint_pos_limits[0, :, 1]
         self.action_offset = 0.5 * (dof_upper_limits + dof_lower_limits)
         self.action_scale = dof_upper_limits - dof_lower_limits
 
@@ -87,66 +84,67 @@ class AllstepsEnv(DirectRLEnv):
 
         # Marker index
         self.marker_idx = torch.zeros((self.num_envs * self.num_steps), dtype=torch.int64, device=self.device)
-        self.marker.visualize(translations=self.steps_pos.view(-1, 3), marker_indices=self.marker_idx)
     
-    def _generate_foot_steps_torch(self, env_ids: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
-        temp_steps_pos, temp_steps_dphi = self.generate_foot_steps_np()
+    def _generate_foot_steps(self, env_ids: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+        temp_steps_pos, temp_steps_dphi = self._generate_foot_steps_allsteps()
         temp_steps_pos = temp_steps_pos + self.scene.env_origins.unsqueeze(1) # (num_envs, num_steps, 3)
         temp_steps_dphi = temp_steps_dphi.repeat(self.num_envs, 1)
         
-        if len(env_ids) > 0:
+        if env_ids is not None:
             self.steps_pos[env_ids] = temp_steps_pos[env_ids]
             self.steps_dphi[env_ids] = temp_steps_dphi[env_ids]
         else:
             self.steps_pos = temp_steps_pos
             self.steps_dphi = temp_steps_dphi
+
+        self.marker.visualize(translations=self.steps_pos.view(-1, 3), marker_indices=self.marker_idx)
         
-    def generate_foot_steps_np(self) -> tuple[torch.Tensor, torch.Tensor]:
+    def _generate_foot_steps_allsteps(self) -> tuple[torch.Tensor, torch.Tensor]:
         self.curriculum = min(self.curriculum, self.max_curriculum)
         ratio = self.curriculum / self.max_curriculum
 
-        dist_upper = np.linspace(*self.dist_range, self.max_curriculum + 1)
-        dist_range = np.array([self.dist_range[0], dist_upper[self.curriculum]])
-        yaw_range = self.yaw_range * 0.7 * DEG2RAD
-        pitch_range = self.pitch_range * ratio * DEG2RAD + np.pi / 2
-        tilt_range = self.tilt_range * ratio * DEG2RAD
+        dist_upper = torch.linspace(*self.dist_range, self.max_curriculum + 1).to(self.device)
+        dist_range = torch.tensor([self.dist_range[0], dist_upper[self.curriculum]], device=self.device)
+        yaw_range = torch.deg2rad(self.yaw_range * 0.7)
+        pitch_range = torch.deg2rad(self.pitch_range * ratio) + torch.pi / 2
+        tilt_range = torch.deg2rad(self.tilt_range * ratio)
 
         N = self.num_steps
-        dr = np.random.uniform(*dist_range, size=N)
-        dphi = np.random.uniform(*yaw_range, size=N)
-        dtheta = np.random.uniform(*pitch_range, size=N)
-        x_tilt = np.random.uniform(*tilt_range, size=N)
-        y_tilt = np.random.uniform(*tilt_range, size=N)
+        dr = torch.empty(N, device=self.device).uniform_(*dist_range)
+        dphi = torch.empty(N, device=self.device).uniform_(*yaw_range)
+        dtheta = torch.empty(N, device=self.device).uniform_(*pitch_range)
+        x_tilt = torch.empty(N, device=self.device).uniform_(*tilt_range)
+        y_tilt = torch.empty(N, device=self.device).uniform_(*tilt_range)
 
         # make first step below feet
         dr[0] = 0.0
         dphi[0] = 0.0
-        dtheta[0] = np.pi / 2
+        dtheta[0] = torch.pi / 2
 
         dr[1:3] = self.init_step_separation
         dphi[1:3] = 0.0
-        dtheta[1:3] = np.pi / 2
+        dtheta[1:3] = torch.pi / 2
 
-        x_tilt[0:3] = 0
-        y_tilt[0:3] = 0
+        x_tilt[:3] = 0
+        y_tilt[:3] = 0
 
-        dphi = np.cumsum(dphi)
+        dphi = torch.cumsum(dphi, dim=0)
 
-        dx = dr * np.sin(dtheta) * np.cos(dphi)
-        dy = dr * np.sin(dtheta) * np.sin(dphi)
-        dz = dr * np.cos(dtheta)
+        dx = dr * torch.sin(dtheta) * torch.cos(dphi)
+        dy = dr * torch.sin(dtheta) * torch.sin(dphi)
+        dz = dr * torch.cos(dtheta)
 
         # Fix overlapping steps
-        dx_max = np.maximum(np.abs(dx[2:]), self.step_radius * 2.5)
-        dx[2:] = np.sign(dx[2:]) * np.minimum(dx_max, self.dist_range[1])
+        dx_max = torch.maximum(torch.abs(dx[2:]), torch.full_like(dx[2:], self.step_radius * 2.5))
+        dx[2:] = torch.sign(dx[2:]) * torch.minimum(dx_max, self.dist_range[1])
 
-        x = np.cumsum(dx)
-        y = np.cumsum(dy)
-        z = np.cumsum(dz)
+        x = torch.cumsum(dx, dim=0)
+        y = torch.cumsum(dy, dim=0)
+        z = torch.cumsum(dz, dim=0)
 
-        z[:] = 0 # set vertical to be 0 for now
+        z[:] = 0  # set vertical to be 0 for now
 
-        return torch.from_numpy(np.stack((x, y, z), axis=1)).to(self.device), torch.from_numpy(dphi).to(self.device)
+        return torch.stack((x, y, z), axis=1).to(self.device), dphi.to(self.device)
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
@@ -194,8 +192,8 @@ class AllstepsEnv(DirectRLEnv):
         
         self.joint_pos_scaled = scale_transform(
             self.robot.data.joint_pos,
-            self.robot.data.joint_limits[:, :, 0],
-            self.robot.data.joint_limits[:, :, 1],
+            self.robot.data.joint_pos_limits[:, :, 0],
+            self.robot.data.joint_pos_limits[:, :, 1],
         )
 
         self.root_vec_b = quat_rotate_inverse(self.robot.data.root_quat_w, self.robot.data.root_lin_vel_w)
@@ -207,11 +205,21 @@ class AllstepsEnv(DirectRLEnv):
         
         # calculate targets
         self._calculate_targets()
-        self.targets_b = subtract_frame_transforms(
+        self.targets_b[:, 0] = subtract_frame_transforms(
             t01=self.robot.data.root_pos_w,
             q01=self.robot.data.root_quat_w,
-            t02=self.targets_w.view(-1, 3)
-        )[0].view(self.num_envs, -1, 3)
+            t02=self.targets_w[:, 0]
+        )[0]
+        self.targets_b[:, 1] = subtract_frame_transforms(
+            t01=self.robot.data.root_pos_w,
+            q01=self.robot.data.root_quat_w,
+            t02=self.targets_w[:, 1]
+        )[0]
+        self.targets_b[:, 2] = subtract_frame_transforms(
+            t01=self.robot.data.root_pos_w,
+            q01=self.robot.data.root_quat_w,
+            t02=self.targets_w[:, 2]
+        )[0]
 
         # update potentials
         self._calculate_body_potentials()
@@ -243,8 +251,8 @@ class AllstepsEnv(DirectRLEnv):
         progress = self.potentials - self.old_potentials
         
         # Some regularization terms 
-        roll_violation = (self.roll > 0.4) | (self.roll < -0.2)
-        pitch_violation = (self.pitch > 0.4) | (self.pitch < -0.4)
+        roll_violation = (self.roll > 0.4) | (self.roll < -0.4)
+        pitch_violation = (self.pitch > 0.4) | (self.pitch < -0.2)
         roll_cost = torch.where(roll_violation, self.roll.abs(), torch.zeros_like(self.roll))
         pitch_cost = torch.where(pitch_violation, self.pitch.abs(), torch.zeros_like(self.pitch))
         
@@ -257,11 +265,11 @@ class AllstepsEnv(DirectRLEnv):
         joint_at_limit_cost = torch.count_nonzero(torch.abs(self.joint_pos_scaled) > 0.98, dim=-1).float() * self.cfg.joint_at_limit_cost_scale
         
         # Step reward to encourage the foot to step on the center of the target
-        step_reward_condition = self.target_reached and self.target_reach_count == 1 and self.curr_target_index < self.num_steps - 1
+        step_reward_condition = (self.target_reached) & (self.target_reach_count == 1) & (self.curr_target_index < self.num_steps - 1)
         dist = self.foot_to_target_dist_xy[torch.arange(self.num_envs), self.swing_leg]
         step_reward = torch.where(step_reward_condition, 50 * torch.exp( -dist / 0.25), torch.zeros_like(step_reward_condition))
         
-        target_bonus_condition = self.curr_target_index == self.num_steps - 1 and self.body_dist_to_target_xy < 0.15
+        target_bonus_condition = (self.curr_target_index == self.num_steps - 1) & (self.body_dist_to_target_xy < 0.15)
         target_bonus = torch.where(target_bonus_condition, torch.ones_like(target_bonus_condition), torch.zeros_like(target_bonus_condition))
         
         # total reward
@@ -287,10 +295,9 @@ class AllstepsEnv(DirectRLEnv):
         self._compute_useful_values()
 
         time_out = self.episode_length_buf >= self.max_episode_length - 1
-        died = self.robot.data.root_pos_w[:, 2] < self.cfg.termination_height
         fell = self.torso_to_feet_height < self.cfg.termination_height_torso_to_feet
 
-        return died | fell, time_out
+        return fell, time_out
     
     def _calculate_body_potentials(self):
         walk_target_delta = self.targets_w[:, -1] - self.robot.data.root_pos_w
@@ -370,7 +377,7 @@ class AllstepsEnv(DirectRLEnv):
         over_half_ids = (self.curr_target_index > self.num_steps // 2).nonzero(as_tuple=False).flatten()
         replace_ids = env_ids[torch.isin(env_ids, over_half_ids)]
         if len(replace_ids) > 0:
-            self._generate_foot_steps_torch(replace_ids)
+            self._generate_foot_steps(replace_ids)
         
         # Reset to a fixed pose for now TODO: add randomization
         joint_pos = self.robot.data.default_joint_pos[env_ids]

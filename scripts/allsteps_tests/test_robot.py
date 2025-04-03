@@ -33,7 +33,6 @@ def design_scene():
     cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.8, 0.8, 0.8))
     cfg.func("/World/Light", cfg)
     
-    # HUMANOID_28_CFG.spawn.rigid_props.disable_gravity = True
     robot = Articulation(cfg=HUMANOID_28_CFG.replace(prim_path="/World/Robot"))
 
     # return the scene information
@@ -46,7 +45,7 @@ def run_simulator(sim: sim_utils.SimulationContext, entities: dict[str, RigidObj
     # Extract scene entities
     # note: we only do this here for readability. In general, it is better to access the entities directly from
     #   the dictionary. This dictionary is replaced by the InteractiveScene class in the next tutorial.
-    # cone_object = entities["cone"]
+    cone_object = entities["robot"]
     # Define simulation stepping
     sim_dt = sim.get_physics_dt()
     sim_time = 0.0
@@ -54,24 +53,24 @@ def run_simulator(sim: sim_utils.SimulationContext, entities: dict[str, RigidObj
     # Simulate physics
     while simulation_app.is_running():
         # reset
-        # if count % 250 == 0:
-        #     # reset counters
-        #     sim_time = 0.0
-        #     count = 0
-        #     # reset root state
-        #     root_state = cone_object.data.default_root_state.clone()
-        #     # sample a random position on a cylinder around the origins
-        #     root_state[:, :3] += origins
-        #     root_state[:, :3] += math_utils.sample_cylinder(
-        #         radius=0.1, h_range=(0.25, 0.5), size=cone_object.num_instances, device=cone_object.device
-        #     )
-        #     # write root state to simulation
-        #     cone_object.write_root_pose_to_sim(root_state[:, :7])
-        #     cone_object.write_root_velocity_to_sim(root_state[:, 7:])
-        #     # reset buffers
-        #     cone_object.reset()
-        #     print("----------------------------------------")
-        #     print("[INFO]: Resetting object state...")
+        if count % 250 == 0:
+            # reset counters
+            sim_time = 0.0
+            count = 0
+            # reset root state
+            root_state = cone_object.data.default_root_state.clone()
+            # sample a random position on a cylinder around the origins
+            # root_state[:, :3] += origins
+            root_state[:, :3] += math_utils.sample_cylinder(
+                radius=0.1, h_range=(0.25, 0.5), size=cone_object.num_instances, device=cone_object.device
+            )
+            # write root state to simulation
+            cone_object.write_root_pose_to_sim(root_state[:, :7])
+            cone_object.write_root_velocity_to_sim(root_state[:, 7:])
+            # reset buffers
+            cone_object.reset()
+            print("----------------------------------------")
+            print("[INFO]: Resetting object state...")
         # # apply sim data
         # cone_object.write_data_to_sim()
         # perform step

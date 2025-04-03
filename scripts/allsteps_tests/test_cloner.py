@@ -44,13 +44,13 @@ class WalkerSceneCfg(InteractiveSceneCfg):
     )
 
     # articulation
-    walker: ArticulationCfg = HUMANOID_28_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-    walker.spawn.activate_contact_sensors = True
+    walker: ArticulationCfg = HUMANOID_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    # walker.spawn.activate_contact_sensors = True
 
     # foot contact sensors
-    foot_contacts: ContactSensorCfg = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/.*_foot", update_period=0.0, history_length=4, debug_vis=True
-    )
+    # foot_contacts: ContactSensorCfg = ContactSensorCfg(
+    #     prim_path="{ENV_REGEX_NS}/Robot/.*_foot", update_period=0.0, history_length=4, debug_vis=True
+    # )
 
 
 def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
@@ -76,9 +76,9 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             robot.write_root_pose_to_sim(root_state[:, :7])
             robot.write_root_velocity_to_sim(root_state[:, 7:])
             # set joint positions with some noise
-            joint_pos, joint_vel = robot.data.default_joint_pos.clone(), robot.data.default_joint_vel.clone()
-            joint_pos += torch.rand_like(joint_pos) * 0.1
-            robot.write_joint_state_to_sim(joint_pos, joint_vel)
+            # joint_pos, joint_vel = robot.data.default_joint_pos.clone(), robot.data.default_joint_vel.clone()
+            # joint_pos += torch.rand_like(joint_pos) * 0.1
+            # robot.write_joint_state_to_sim(joint_pos, joint_vel)
             # clear internal buffers
             scene.reset()
             print("[INFO]: Resetting robot state...")
@@ -89,7 +89,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         # robot.set_joint_effort_target(efforts)
         # -- write data to sim
         scene.write_data_to_sim()
-        print(torch.norm(scene.sensors["foot_contacts"].data.net_forces_w, dim=-1) > 1e-4)
+        # print(torch.norm(scene.sensors["foot_contacts"].data.net_forces_w, dim=-1) > 1e-4)
         # Perform step
         sim.step()
         # Increment counter

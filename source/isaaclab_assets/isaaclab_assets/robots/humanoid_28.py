@@ -36,14 +36,14 @@ HUMANOID_28_CFG = ArticulationCfg(
         activate_contact_sensors=True,
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.0),
+        pos=(0.0, 0.0, 0.8),
         joint_pos={".*": 0.0},
     ),
     actuators={
         "body": ImplicitActuatorCfg(
             joint_names_expr=[".*"],
-            stiffness=0.0,
-            damping=0.0,
+            stiffness=None,
+            damping=None,
         ),
     },
 )

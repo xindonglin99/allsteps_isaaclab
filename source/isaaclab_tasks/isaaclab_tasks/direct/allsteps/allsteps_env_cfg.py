@@ -18,8 +18,8 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     episode_length_s = 15.0
     decimation = 4
     action_scale = 1.0
-    action_space = 28
-    observation_space = 73
+    action_space = 21
+    observation_space = 59
     state_space = 0
 
     # simulation
@@ -42,20 +42,22 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
 
     # robot
-    robot: ArticulationCfg = HUMANOID_28_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    robot: ArticulationCfg = HUMANOID_CFG.replace(prim_path="/World/envs/env_.*/Robot")
 
     step_radius: float = 0.25
+
+    marker_radius: float = 0.05
 
     # foot step markers
     step_markers: VisualizationMarkersCfg = VisualizationMarkersCfg(
         prim_path="/World/Visuals/stepMarkers",
         markers={
             "marker1": sim_utils.SphereCfg(
-                radius=step_radius,
+                radius=marker_radius,
                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0)),
             ),
             "marker2": sim_utils.SphereCfg(
-                radius=step_radius,
+                radius=marker_radius,
                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.0, 1.0)),
             ),
         }
@@ -63,7 +65,7 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
 
     # foot contact sensors
     foot_contacts: ContactSensorCfg = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/.*_foot", update_period=0.0, history_length=4, debug_vis=True
+        prim_path="/World/envs/env_.*/Robot/.*_foot", update_period=0.0, history_length=4, debug_vis=True
     )
     
     # joint_gears: list = [
@@ -90,67 +92,65 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     #     60, # left_elbow
     # ] # 21 WALER3d joint gears
     
-    # joint_gears: list = [
-    #     67.5000,  # lower_waist
-    #     67.5000,  # lower_waist
-    #     67.5000,  # right_upper_arm
-    #     67.5000,  # right_upper_arm
-    #     67.5000,  # left_upper_arm
-    #     67.5000,  # left_upper_arm
-    #     67.5000,  # pelvis
-    #     45.0000,  # right_lower_arm
-    #     45.0000,  # left_lower_arm
-    #     45.0000,  # right_thigh: x
-    #     135.0000,  # right_thigh: y
-    #     45.0000,  # right_thigh: z
-    #     45.0000,  # left_thigh: x
-    #     135.0000,  # left_thigh: y
-    #     45.0000,  # left_thigh: z
-    #     90.0000,  # right_knee
-    #     90.0000,  # left_knee
-    #     22.5,  # right_foot
-    #     22.5,  # right_foot
-    #     22.5,  # left_foot
-    #     22.5,  # left_foot
-    # ] # HUMANOID 21 joint gears
-    
     joint_gears: list = [
-        60.0000,  # 'abdomen_x'
-        80.0000,  # 'abdomen_y'
-        60.0000,  # 'abdomen_z'
-        20.0000,  # 'neck_x'
-        20.0000,  # 'neck_y'
-        20.0000,  # 'neck_z'
-        60.0000,  # 'right_shoulder_x'
-        60.0000,  # 'right_shoulder_y'
-        60.0000,  # 'right_shoulder_z'
-        60.0000,  # 'left_shoulder_x'
-        60.0000,  # 'left_shoulder_y'
-        60.0000,  # 'left_shoulder_z'
-        80.0000,  # 'right_hip_x'
-        100.0000, # 'right_hip_y'
-        60.0000,  # 'right_hip_z'
-        80.0000,  # 'left_hip_x'
-        100.0000, # 'left_hip_y'
-        60.0000,  # 'left_hip_z'
-        60.0000,  # 'right_elbow'
-        60.0000,  # 'left_elbow'
-        90.0000,  # 'right_knee'
-        90.0000,  # 'left_knee'
-        20.0000,  # 'right_ankle_x'
-        60.0000,  # 'right_ankle_y'
-        20.0000,  # 'right_ankle_z'
-        20.0000,  # 'left_ankle_x'
-        60.0000,  # 'left_ankle_y'
-        20.0000,  # 'left_ankle_z'
-    ] # HUMANOID 28 joint gears
+        67.5000,  # lower_waist
+        67.5000,  # lower_waist
+        67.5000,  # right_upper_arm
+        67.5000,  # right_upper_arm
+        67.5000,  # left_upper_arm
+        67.5000,  # left_upper_arm
+        67.5000,  # pelvis
+        45.0000,  # right_lower_arm
+        45.0000,  # left_lower_arm
+        45.0000,  # right_thigh: x
+        135.0000,  # right_thigh: y
+        45.0000,  # right_thigh: z
+        45.0000,  # left_thigh: x
+        135.0000,  # left_thigh: y
+        45.0000,  # left_thigh: z
+        90.0000,  # right_knee
+        90.0000,  # left_knee
+        22.5,  # right_foot
+        22.5,  # right_foot
+        22.5,  # left_foot
+        22.5,  # left_foot
+    ] # HUMANOID 21 joint gears
+    
+    # joint_gears: list = [
+    #     60.0000,  # 'abdomen_x'
+    #     80.0000,  # 'abdomen_y'
+    #     60.0000,  # 'abdomen_z'
+    #     20.0000,  # 'neck_x'
+    #     20.0000,  # 'neck_y'
+    #     20.0000,  # 'neck_z'
+    #     60.0000,  # 'right_shoulder_x'
+    #     60.0000,  # 'right_shoulder_y'
+    #     60.0000,  # 'right_shoulder_z'
+    #     60.0000,  # 'left_shoulder_x'
+    #     60.0000,  # 'left_shoulder_y'
+    #     60.0000,  # 'left_shoulder_z'
+    #     80.0000,  # 'right_hip_x'
+    #     100.0000, # 'right_hip_y'
+    #     60.0000,  # 'right_hip_z'
+    #     80.0000,  # 'left_hip_x'
+    #     100.0000, # 'left_hip_y'
+    #     60.0000,  # 'left_hip_z'
+    #     60.0000,  # 'right_elbow'
+    #     60.0000,  # 'left_elbow'
+    #     90.0000,  # 'right_knee'
+    #     90.0000,  # 'left_knee'
+    #     20.0000,  # 'right_ankle_x'
+    #     60.0000,  # 'right_ankle_y'
+    #     20.0000,  # 'right_ankle_z'
+    #     20.0000,  # 'left_ankle_x'
+    #     60.0000,  # 'left_ankle_y'
+    #     20.0000,  # 'left_ankle_z'
+    # ] # HUMANOID 28 joint gears
     
     force_scale = 1.0
     
     torso_name: str = "torso"
     foot_names: list = ["right_foot", "left_foot"]
-    heading_weight: float = 0.5
-    up_weight: float = 0.1
 
     energy_cost_scale: float = 0.214
     actions_cost_scale: float = 0.01
@@ -159,8 +159,7 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     joint_at_limit_cost_scale: float = 0.1
 
     death_cost: float = -1.0
-    termination_height: float = 0.7
-    termination_height_torso_to_feet: float = 0.5
+    termination_height_torso_to_feet: float = 0.70
 
     angular_velocity_scale: float = 0.25
 

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Tuple
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg, RigidObjectCfg, RigidObjectCollectionCfg
@@ -19,7 +20,7 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     decimation = 4
     action_scale = 1.0
     action_space = 21
-    observation_space = 59
+    observation_space = 56
     state_space = 0
 
     # simulation
@@ -42,22 +43,26 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
 
     # robot
-    robot: ArticulationCfg = HUMANOID_CFG.replace(prim_path="/World/envs/env_.*/Robot")
+    robot: ArticulationCfg = WALKER_CFG.replace(prim_path="/World/envs/env_.*/Robot")
 
-    step_radius: float = 0.25
+    camera_pos: Tuple[float, float, float] = (2.2, 2.2, 3.0)
 
-    marker_radius: float = 0.05
+    step_radius: float = 0.35
+
+    marker_radius: float = 0.35
 
     # foot step markers
     step_markers: VisualizationMarkersCfg = VisualizationMarkersCfg(
         prim_path="/World/Visuals/stepMarkers",
         markers={
-            "marker1": sim_utils.SphereCfg(
-                radius=marker_radius,
+            "marker1": sim_utils.ConeCfg(
+                radius=step_radius,
+                height=0.05,
                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0)),
             ),
-            "marker2": sim_utils.SphereCfg(
-                radius=marker_radius,
+            "marker2": sim_utils.ConeCfg(
+                radius=step_radius,
+                height=0.05,
                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.0, 1.0)),
             ),
         }
@@ -65,56 +70,56 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
 
     # foot contact sensors
     foot_contacts: ContactSensorCfg = ContactSensorCfg(
-        prim_path="/World/envs/env_.*/Robot/.*_foot", update_period=0.0, history_length=4, debug_vis=True
+        prim_path="/World/envs/env_.*/Robot/walker3d/.*_foot", update_period=0.0, history_length=4, debug_vis=True
     )
     
-    # joint_gears: list = [
-    #     60, # abdomen_z
-    #     80, # abdomen_y 
-    #     60, # abdomen_x
-    #     80, # right_hip_x
-    #     60, # right_hip_z
-    #     100, # right_hip_y
-    #     90, # right_knee
-    #     60, # right_ankle
-    #     80, # left_hip_x
-    #     60, # left_hip_z
-    #     100, # left_hip_y
-    #     90, # left_knee
-    #     60, # left_ankle
-    #     60, # right_shoulder_x
-    #     60, # right_shoulder_z
-    #     50, # right_shoulder_y
-    #     60, # right_elbow
-    #     60, # left_shoulder_x
-    #     60, # left_shoulder_z
-    #     50, # left_shoulder_y
-    #     60, # left_elbow
-    # ] # 21 WALER3d joint gears
-    
     joint_gears: list = [
-        67.5000,  # lower_waist
-        67.5000,  # lower_waist
-        67.5000,  # right_upper_arm
-        67.5000,  # right_upper_arm
-        67.5000,  # left_upper_arm
-        67.5000,  # left_upper_arm
-        67.5000,  # pelvis
-        45.0000,  # right_lower_arm
-        45.0000,  # left_lower_arm
-        45.0000,  # right_thigh: x
-        135.0000,  # right_thigh: y
-        45.0000,  # right_thigh: z
-        45.0000,  # left_thigh: x
-        135.0000,  # left_thigh: y
-        45.0000,  # left_thigh: z
-        90.0000,  # right_knee
-        90.0000,  # left_knee
-        22.5,  # right_foot
-        22.5,  # right_foot
-        22.5,  # left_foot
-        22.5,  # left_foot
-    ] # HUMANOID 21 joint gears
+        60, # abdomen_z
+        80, # abdomen_y 
+        60, # abdomen_x
+        80, # right_hip_x
+        60, # right_hip_z
+        100, # right_hip_y
+        90, # right_knee
+        60, # right_ankle
+        80, # left_hip_x
+        60, # left_hip_z
+        100, # left_hip_y
+        90, # left_knee
+        60, # left_ankle
+        60, # right_shoulder_x
+        60, # right_shoulder_z
+        50, # right_shoulder_y
+        60, # right_elbow
+        60, # left_shoulder_x
+        60, # left_shoulder_z
+        50, # left_shoulder_y
+        60, # left_elbow
+    ] # 21 WALER3d joint gears
+    
+    # joint_gears: list = [
+    #     67.5000,  # lower_waist
+    #     67.5000,  # lower_waist
+    #     67.5000,  # right_upper_arm
+    #     67.5000,  # right_upper_arm
+    #     67.5000,  # left_upper_arm
+    #     67.5000,  # left_upper_arm
+    #     67.5000,  # pelvis
+    #     45.0000,  # right_lower_arm
+    #     45.0000,  # left_lower_arm
+    #     45.0000,  # right_thigh: x
+    #     135.0000,  # right_thigh: y
+    #     45.0000,  # right_thigh: z
+    #     45.0000,  # left_thigh: x
+    #     135.0000,  # left_thigh: y
+    #     45.0000,  # left_thigh: z
+    #     90.0000,  # right_knee
+    #     90.0000,  # left_knee
+    #     22.5,  # right_foot
+    #     22.5,  # right_foot
+    #     22.5,  # left_foot
+    #     22.5,  # left_foot
+    # ] # HUMANOID 21 joint gears
     
     # joint_gears: list = [
     #     60.0000,  # 'abdomen_x'
@@ -147,7 +152,7 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     #     20.0000,  # 'left_ankle_z'
     # ] # HUMANOID 28 joint gears
     
-    force_scale = 1.0
+    force_scale = 1.2
     
     torso_name: str = "torso"
     foot_names: list = ["right_foot", "left_foot"]
@@ -160,7 +165,11 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
 
     death_cost: float = -1.0
     termination_height_torso_to_feet: float = 0.70
+    termination_height_absolute: float = 0.6
 
     angular_velocity_scale: float = 0.25
+
+    initial_joint_angle_range: list = [-0.1, 0.1] # rad
+    initial_joint_angle_clip_range: list = [-0.95, 0.95] # rad
 
     

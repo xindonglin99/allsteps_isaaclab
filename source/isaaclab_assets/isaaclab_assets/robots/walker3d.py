@@ -31,9 +31,10 @@ WALKER_CFG = ArticulationCfg(
             stabilization_threshold=0.001,
         ),
         copy_from_source=False,
+        activate_contact_sensors=True,
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.8),
+        pos=(0.0, 0.0, 1.32),
         joint_pos={".*": 0.0},
     ),
     actuators={

@@ -44,12 +44,12 @@ class WalkerSceneCfg(InteractiveSceneCfg):
     )
 
     # articulation
-    walker: ArticulationCfg = HUMANOID_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    walker: ArticulationCfg = WALKER_CFG.replace(prim_path="/World/envs/env_.*/Robot")
     # walker.spawn.activate_contact_sensors = True
 
-    # foot contact sensors
+    #foot contact sensors
     # foot_contacts: ContactSensorCfg = ContactSensorCfg(
-    #     prim_path="{ENV_REGEX_NS}/Robot/.*_foot", update_period=0.0, history_length=4, debug_vis=True
+    #     prim_path="/World/envs/env_.*/Robot/left_foot", update_period=0.0, history_length=4, debug_vis=True
     # )
 
 
@@ -76,9 +76,9 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             robot.write_root_pose_to_sim(root_state[:, :7])
             robot.write_root_velocity_to_sim(root_state[:, 7:])
             # set joint positions with some noise
-            # joint_pos, joint_vel = robot.data.default_joint_pos.clone(), robot.data.default_joint_vel.clone()
+            joint_pos, joint_vel = robot.data.default_joint_pos.clone(), robot.data.default_joint_vel.clone()
             # joint_pos += torch.rand_like(joint_pos) * 0.1
-            # robot.write_joint_state_to_sim(joint_pos, joint_vel)
+            robot.write_joint_state_to_sim(joint_pos, joint_vel)
             # clear internal buffers
             scene.reset()
             print("[INFO]: Resetting robot state...")

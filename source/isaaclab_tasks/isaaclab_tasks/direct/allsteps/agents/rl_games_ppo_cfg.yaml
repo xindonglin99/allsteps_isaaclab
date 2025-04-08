@@ -1,5 +1,5 @@
 params:
-  seed: 42
+  seed: 16
 
   # environment wrapper clipping
   env:
@@ -26,7 +26,7 @@ params:
           val: 0
         fixed_sigma: True
     mlp:
-      units: [400, 200, 100]
+      units: [256, 256, 256, 256, 256]
       activation: elu
       d2rl: False
 
@@ -55,11 +55,11 @@ params:
     normalize_advantage: True
     gamma: 0.99
     tau: 0.95
-    learning_rate: 5e-4
+    learning_rate: 3e-4
     lr_schedule: adaptive
     kl_threshold: 0.008
-    score_to_win: 20000
-    max_epochs: 2000
+    score_to_win: 3000
+    max_epochs: 4000
     save_best_after: 100
     save_frequency: 50
     grad_norm: 1.0
@@ -68,7 +68,7 @@ params:
     e_clip: 0.2
     horizon_length: 32
     minibatch_size: 32768
-    mini_epochs: 5
+    mini_epochs: 10
     critic_coef: 4
     clip_value: True
     seq_length: 4

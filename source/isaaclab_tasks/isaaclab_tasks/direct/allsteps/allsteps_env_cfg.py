@@ -152,7 +152,7 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     #     20.0000,  # 'left_ankle_z'
     # ] # HUMANOID 28 joint gears
     
-    force_scale = 1.2
+    force_scale = 1.0
     
     torso_name: str = "torso"
     foot_names: list = ["right_foot", "left_foot"]
@@ -164,8 +164,8 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     joint_at_limit_cost_scale: float = 0.1
 
     death_cost: float = -1.0
-    termination_height_torso_to_feet: float = 0.70
-    termination_height_absolute: float = 0.6
+    termination_height_torso_to_feet: float = 0.75
+    termination_height_absolute: float = 0.3
 
     angular_velocity_scale: float = 0.25
 

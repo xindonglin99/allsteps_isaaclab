@@ -261,6 +261,10 @@ class RlGamesVecEnvWrapper(IVecEnv):
         if "log" in extras:
             extras["episode"] = extras.pop("log")
 
+        if "mean_curriculum" in extras:
+            # move mean curriculum to rl-device  
+            print(f"The current mean curriculum is:{extras['mean_curriculum']}.")
+
         return obs_and_states, rew, dones, extras
 
     def close(self):  # noqa: D102

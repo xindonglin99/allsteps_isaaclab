@@ -18,7 +18,7 @@ import isaacsim.core.utils.prims as prim_utils
 
 import isaaclab.sim as sim_utils
 import isaaclab.utils.math as math_utils
-from isaaclab.assets import RigidObject, Articulation
+from isaaclab.assets import RigidObject, Articulation, RigidObjectCfg
 from isaaclab.sim import SimulationContext
 
 from isaaclab_assets import WALKER_CFG, HUMANOID_28_CFG
@@ -27,13 +27,26 @@ from isaaclab_assets import WALKER_CFG, HUMANOID_28_CFG
 def design_scene():
     """Designs the scene."""
     # Ground-plane
-    cfg = sim_utils.GroundPlaneCfg()
-    cfg.func("/World/defaultGroundPlane", cfg)
+    # cfg = sim_utils.GroundPlaneCfg()
+    # cfg.func("/World/defaultGroundPlane", cfg)
     # Lights
     cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.8, 0.8, 0.8))
     cfg.func("/World/Light", cfg)
     
-    robot = Articulation(cfg=HUMANOID_28_CFG.replace(prim_path="/World/Robot"))
+    robot = Articulation(cfg=WALKER_CFG.replace(prim_path="/World/Robot"))
+
+    box_cfg = RigidObjectCfg(
+        prim_path="/World/Box",
+        spawn=sim_utils.CuboidCfg(
+            size=(0.5, 0.8, 0.225),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.1, 0.1, 0.1), metallic=0.2),
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(0.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0, 1.0)),
+    )
+
+    box = RigidObject(cfg=box_cfg)
 
     # return the scene information
     scene_entities = {"robot": robot}

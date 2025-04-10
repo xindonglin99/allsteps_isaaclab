@@ -13,6 +13,38 @@ from isaaclab.sensors import ContactSensorCfg
 
 from isaaclab_assets import WALKER_CFG, HUMANOID_28_CFG, HUMANOID_CFG
 
+def create_step_cfg(num_steps: int, size: Tuple[float, float, float]) -> RigidObjectCollectionCfg:
+    """Create a step configuration."""
+    collection = {}
+    spawn_cfg = sim_utils.CuboidCfg(
+        size=size,
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+        collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.1, 0.1, 0.1), metallic=0.2),
+        # physics_material=sim_utils.RigidBodyMaterialCfg(
+        #     friction_combine_mode="average",
+        #     restitution_combine_mode="average",
+        #     static_friction=1.0,
+        #     dynamic_friction=1.0,
+        #     restitution=0.0,
+        # ),
+    )
+    initial_state = RigidObjectCfg.InitialStateCfg()
+
+    for i in range(num_steps):
+        key = "step_" + str(i)
+        current_prim_path = "/World/envs/env_.*/" + key 
+        collection[key] = RigidObjectCfg(
+            prim_path=current_prim_path,
+            spawn=spawn_cfg,
+            init_state=initial_state,
+            collision_group=0,
+            debug_vis=False,
+    )
+
+        
+    return RigidObjectCollectionCfg(rigid_objects=collection)
+
 @configclass
 class AllstepsEnvCfg(DirectRLEnvCfg):
     # env
@@ -20,7 +52,7 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     decimation = 4
     action_scale = 1.0
     action_space = 21
-    observation_space = 56
+    observation_space = 59
     state_space = 0
 
     # simulation
@@ -45,7 +77,11 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     # robot
     robot: ArticulationCfg = WALKER_CFG.replace(prim_path="/World/envs/env_.*/Robot")
 
-    camera_pos: Tuple[float, float, float] = (2.2, 2.2, 3.0)
+    # Steps
+    num_steps: int = 20
+    steps: RigidObjectCollectionCfg = create_step_cfg(num_steps=num_steps, size=(0.5, 0.8, 0.225))
+
+    camera_pos: Tuple[float, float, float] = (1.5, -4.0, 1.5)
 
     step_radius: float = 0.35
 
@@ -55,14 +91,14 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     step_markers: VisualizationMarkersCfg = VisualizationMarkersCfg(
         prim_path="/World/Visuals/stepMarkers",
         markers={
-            "marker1": sim_utils.ConeCfg(
-                radius=step_radius,
-                height=0.05,
+            "marker1": sim_utils.CylinderCfg(
+                radius=0.1,
+                height=0.00001,
                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0)),
             ),
-            "marker2": sim_utils.ConeCfg(
-                radius=step_radius,
-                height=0.05,
+            "marker2": sim_utils.CylinderCfg(
+                radius=0.1,
+                height=0.00001,
                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.0, 1.0)),
             ),
         }
@@ -152,7 +188,7 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     #     20.0000,  # 'left_ankle_z'
     # ] # HUMANOID 28 joint gears
     
-    force_scale = 1.0
+    force_scale = 1.5
     
     torso_name: str = "torso"
     foot_names: list = ["right_foot", "left_foot"]
@@ -164,12 +200,11 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     joint_at_limit_cost_scale: float = 0.1
 
     death_cost: float = -1.0
-    termination_height_torso_to_feet: float = 0.75
-    termination_height_absolute: float = 0.3
+    termination_height_absolute: float = 0.2
 
     angular_velocity_scale: float = 0.25
 
     initial_joint_angle_range: list = [-0.1, 0.1] # rad
     initial_joint_angle_clip_range: list = [-0.95, 0.95] # rad
 
-    
+

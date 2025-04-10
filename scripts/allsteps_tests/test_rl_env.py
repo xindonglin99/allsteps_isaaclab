@@ -13,13 +13,13 @@ from isaaclab.app import AppLauncher
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Tutorial on running the cartpole RL environment.")
-parser.add_argument("--num_envs", type=int, default=4, help="Number of environments to spawn.")
+parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to spawn.")
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
 args_cli = parser.parse_args()
-args_cli.device = "cpu"
+args_cli.device = "cuda:0"
 
 # launch omniverse app
 app_launcher = AppLauncher(args_cli)
@@ -29,19 +29,19 @@ simulation_app = app_launcher.app
 
 import torch
 
-from isaaclab_tasks.direct.climbing.single_target_env import SingleTargetEnv
+from isaaclab_tasks.direct.allsteps.allsteps_env import AllstepsEnv
 
-from isaaclab_tasks.direct.climbing.single_target_env_cfg import SingleTargetEnvCfg
+from isaaclab_tasks.direct.allsteps.allsteps_env_cfg import AllstepsEnvCfg
 
 
 def main():
     """Main function."""
     # create environment configuration
-    env_cfg = SingleTargetEnvCfg()
+    env_cfg = AllstepsEnvCfg()
     env_cfg.scene.num_envs = args_cli.num_envs
     env_cfg.sim.device = args_cli.device
     # setup RL environment
-    env = SingleTargetEnv(cfg=env_cfg)
+    env = AllstepsEnv(cfg=env_cfg)
 
     # simulate physics
     count = 0
@@ -54,15 +54,15 @@ def main():
                 print("-" * 80)
                 print("[INFO]: Resetting environment...")
             # sample random actions
-            joint_efforts = 2 * torch.rand(env.action_space.shape) - 1
+            # joint_efforts = 2 * torch.rand(env.action_space.shape) - 1
             joint_efforts_zero = torch.zeros(env.action_space.shape)
-            paths = env._generate_hold_path([0, 1])
-            if count % 1800 == 0:
-                for path in paths:
-                    env._grab(path)
-            if count % 1800 == 900:
-                for path in paths:
-                    env._release(path)
+            # paths = env._generate_hold_path([0, 1])
+            # if count % 1800 == 0:
+            #     for path in paths:
+            #         env._grab(path)
+            # if count % 1800 == 900:
+            #     for path in paths:
+            #         env._release(path)
             # step the environment
             obs, rew, terminated, truncated, info = env.step(joint_efforts_zero)
             # print current orientation of pole

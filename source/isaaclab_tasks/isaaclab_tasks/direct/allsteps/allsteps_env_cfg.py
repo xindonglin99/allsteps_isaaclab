@@ -109,28 +109,29 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
         prim_path="/World/envs/env_.*/Robot/walker3d/.*_foot", update_period=0.0, history_length=4, debug_vis=True
     )
     
+    # Joint correspondence is different than in original file
     joint_gears: list = [
         60, # abdomen_z
-        80, # abdomen_y 
-        60, # abdomen_x
-        80, # right_hip_x
-        60, # right_hip_z
-        100, # right_hip_y
-        90, # right_knee
-        60, # right_ankle
-        80, # left_hip_x
-        60, # left_hip_z
-        100, # left_hip_y
-        90, # left_knee
-        60, # left_ankle
+        80, # abdomen_y
         60, # right_shoulder_x
-        60, # right_shoulder_z
         50, # right_shoulder_y
-        60, # right_elbow
+        60, # right_shoulder_z
         60, # left_shoulder_x
-        60, # left_shoulder_z
         50, # left_shoulder_y
+        60, # left_shoulder_z
+        60, # abdomen_x
+        60, # right_elbow
         60, # left_elbow
+        80, # right_hip_x
+        100, # right_hip_y
+        60, # right_hip_z
+        80, # left_hip_x
+        100, # left_hip_y
+        60, # left_hip_z
+        90, # right_knee
+        90, # left_knee
+        60, # right_ankle
+        60, # left_ankle
     ] # 21 WALER3d joint gears
     
     # joint_gears: list = [

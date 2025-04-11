@@ -33,16 +33,16 @@ class AllstepsEnv(DirectRLEnv):
         super().__init__(cfg, render_mode, **kwargs)
         
         # Terrain info
-        self.dist_range = torch.tensor([0.6, 1.25], dtype=torch.float32, device=self.device)
+        self.dist_range = torch.tensor([0.65, 1.25], dtype=torch.float32, device=self.device)
         self.pitch_range = torch.tensor([-30, 30], dtype=torch.float32, device=self.device)
         self.yaw_range = torch.tensor([-20, 20], dtype=torch.float32, device=self.device)
         self.tilt_range = torch.tensor([-15, 15], dtype=torch.float32, device=self.device)
         self.max_curriculum = torch.tensor(9, dtype=torch.int64, device=self.device)
-        self.termination_curriculum = torch.linspace(0.6, 0.45, self.max_curriculum + 1).to(self.device)
+        self.termination_curriculum = torch.linspace(0.75, 0.45, self.max_curriculum + 1).to(self.device)
         self.applied_gain_curriculum = torch.linspace(1.3, 1.5, self.max_curriculum + 1).to(self.device)
-        self.curriculum = torch.zeros(self.num_envs, dtype=torch.int64, device=self.device)
+        self.curriculum = torch.zeros(self.num_envs, dtype=torch.int64, device=self.device) + 9
         self.num_steps = self.cfg.num_steps
-        self.init_step_separation = 0.6
+        self.init_step_separation = 0.75
         self.step_radius = self.cfg.step_radius
         self.target_dim = 3
         self.curriculum_progess_theshold = 12
@@ -63,12 +63,12 @@ class AllstepsEnv(DirectRLEnv):
         self._generate_foot_steps()
 
         # pre allocate buffers
-        self.swing_leg = torch.ones(self.num_envs, dtype=torch.int64, device=self.device) # Left leg to start with
-        self.curr_target_index = torch.zeros(self.num_envs, dtype=torch.int64, device=self.device) # 1
-        self.prev_target_index = self.curr_target_index.clone()
+        self.swing_leg = torch.ones(self.num_envs, dtype=torch.int64, device=self.device) # Left leg start on next target [0,0]
+        self.curr_target_index = torch.ones(self.num_envs, dtype=torch.int64, device=self.device) # 1
+        self.prev_target_index = torch.clamp(self.curr_target_index - 1, 0, self.num_steps - 1)
         self.next_target_index = torch.clamp(self.curr_target_index + 1, 0, self.num_steps - 1)
         self.target_reach_count = torch.zeros(self.num_envs, dtype=torch.int64, device=self.device)
-        self.stop_frames = 30 # 0.5 seconds -> 60hz control step
+        self.stop_frames = 4 # 0.5 seconds -> 60hz control step
         self.foot_contact = torch.zeros((self.num_envs, 2), dtype=torch.float32, device=self.device) # (N, B)
 
         # joint gears for torque controller
@@ -296,10 +296,13 @@ class AllstepsEnv(DirectRLEnv):
         # update potentials
         self._calculate_body_potentials()
 
+
         # Adjust camera
         self.sim.set_camera_view(eye=self.cfg.camera_pos, target=tuple(self.robot.data.root_pos_w[0].tolist()))
 
     def _get_observations(self) -> dict:
+        # if self.num_envs == 1:
+        #     print(self.curr_target_index)
         # build task observation
         obs = torch.cat(
             (
@@ -387,7 +390,7 @@ class AllstepsEnv(DirectRLEnv):
         self.foot_dist_to_target = torch.linalg.vector_norm(foot_delta, dim=-1)
         
         self.old_potentials = self.potentials.clone()
-        self.potentials = -(self.body_dist_to_target_xy + self.foot_dist_to_target) / self.step_dt
+        self.potentials = -(self.body_dist_to_target_xy) / self.step_dt
         
     def _calculate_foot_state(self):
         '''Calculate the foot state and update the target index.
@@ -441,7 +444,9 @@ class AllstepsEnv(DirectRLEnv):
         # if we progress over half of the steps, we need to generate new foot steps
         if self.curr_target_index.float().mean() > self.curriculum_progess_theshold:
             self.curriculum = torch.clamp(self.curriculum + 1, 0, self.max_curriculum)
+            print("--------------------------------------------")
             print(f"The current curriculum : {self.curriculum[0].item()}")
+            print("--------------------------------------------")
 
         if env_ids is None or len(env_ids) == self.num_envs:
             env_ids = self.robot._ALL_INDICES
@@ -465,8 +470,14 @@ class AllstepsEnv(DirectRLEnv):
 
         # self.extras["mean_curriculum"] = self.curriculum.float().mean()
         
-        # Reset to a fixed pose for now 
+        # IMPORTANT: running start of the pose
         joint_pos = self.robot.data.default_joint_pos[env_ids]
+        joint_pos[:, [12, 17]] = -torch.pi / 8 # Right leg, hip_y, knee
+        joint_pos[:, 15] = torch.pi / 10 # Left leg back, hip_y
+        joint_pos[:, [2, 5]] = torch.pi / 3 # Left shoulder x, right shoulder x
+        joint_pos[:, 4] = -torch.pi / 6 # Right shoulder z
+        joint_pos[:, 7] = torch.pi / 6 # Left shoulder z
+        joint_pos[:, [9, 10]] = torch.pi / 3 # Left elbow, right elbow
         joint_pos[:] += sample_uniform(
             self.cfg.initial_joint_angle_range[0],
             self.cfg.initial_joint_angle_range[1],

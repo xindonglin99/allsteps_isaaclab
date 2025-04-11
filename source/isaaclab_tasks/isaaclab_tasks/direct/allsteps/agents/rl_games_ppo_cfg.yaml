@@ -58,8 +58,8 @@ params:
     learning_rate: 3e-4
     lr_schedule: adaptive
     kl_threshold: 0.008
-    score_to_win: 3000
-    max_epochs: 4000
+    score_to_win: 6000
+    max_epochs: 5000
     save_best_after: 100
     save_frequency: 50
     grad_norm: 1.0

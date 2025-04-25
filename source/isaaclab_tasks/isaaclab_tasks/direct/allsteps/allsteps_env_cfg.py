@@ -193,8 +193,9 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     
     torso_name: str = "torso"
     foot_names: list = ["right_foot", "left_foot"]
+    hip_y_names: list = ["right_hip_y", "left_hip_y"]
 
-    energy_cost_scale: float = 0.214
+    energy_cost_scale: float = 0.005
     actions_cost_scale: float = 0.01
     alive_reward_scale: float = 2.0
     dof_vel_scale: float = 0.1

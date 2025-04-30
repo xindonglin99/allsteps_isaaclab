@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from typing import Optional, Tuple
+
 import gymnasium as gym
 import torch
 
@@ -15,6 +17,8 @@ from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils.math import quat_rotate, quat_rotate_inverse, subtract_frame_transforms, scale_transform, unscale_transform, euler_xyz_from_quat, sample_uniform
 from isaaclab.markers import VisualizationMarkers
 from isaaclab.sensors import ContactSensor
+
+from isaaclab_rl.rsl_rl.vecenv_wrapper import RslRlVecEnvWrapper
 
 from isaaclab.envs import DirectRLEnv
 from .allsteps_env_cfg import AllstepsEnvCfg
@@ -33,20 +37,21 @@ class AllstepsEnv(DirectRLEnv):
         super().__init__(cfg, render_mode, **kwargs)
         
         # Terrain info
-        self.dist_range = torch.tensor([0.6, 0.9], dtype=torch.float32, device=self.device)
+        self.dist_range = torch.tensor([0.65, 0.9], dtype=torch.float32, device=self.device)
         self.pitch_range = torch.tensor([-30, 30], dtype=torch.float32, device=self.device)
         self.yaw_range = torch.tensor([-20, 20], dtype=torch.float32, device=self.device)
         self.tilt_range = torch.tensor([-15, 15], dtype=torch.float32, device=self.device)
         self.max_curriculum = torch.tensor(9, dtype=torch.int64, device=self.device)
         self.termination_curriculum = torch.linspace(0.75, 0.45, self.max_curriculum + 1).to(self.device)
-        self.applied_gain_curriculum = torch.linspace(1.0, 1.2, self.max_curriculum + 1).to(self.device)
+        self.applied_gain_curriculum = torch.linspace(1.1, 1.2, self.max_curriculum + 1).to(self.device)
         self.curriculum = torch.zeros(self.num_envs, dtype=torch.int64, device=self.device)
         self.num_steps = self.cfg.num_steps
-        self.init_step_separation = 0.6
+        self.init_step_separation = 0.65
         self.step_radius = self.cfg.step_radius
         self.target_dim = 3
         self.curriculum_progess_theshold = 12
         self.foot_sep = 0.16
+        self.mirrored = False
         
         
         self.look_ahead = 2
@@ -65,11 +70,11 @@ class AllstepsEnv(DirectRLEnv):
 
         # pre allocate buffers
         self.swing_leg = torch.zeros(self.num_envs, dtype=torch.int64, device=self.device) # Left leg start on next target [0,0]
-        self.curr_target_index = torch.ones(self.num_envs, dtype=torch.int64, device=self.device) # 1
+        self.curr_target_index = torch.ones(self.num_envs, dtype=torch.int64, device=self.device) # WARNING: if change this, need to change the reset() as well
         self.prev_target_index = torch.clamp(self.curr_target_index - 1, 0, self.num_steps - 1)
         self.next_target_index = torch.clamp(self.curr_target_index + 1, 0, self.num_steps - 1)
         self.target_reach_count = torch.zeros(self.num_envs, dtype=torch.int64, device=self.device)
-        self.stop_frames = 20 # 0.5 seconds -> 60hz control step
+        self.stop_frames = 2 # 0.5 seconds -> 60hz control step
         self.foot_contact = torch.zeros((self.num_envs, 2), dtype=torch.float32, device=self.device) # (N, B)
 
         # joint gears for torque controller
@@ -81,6 +86,9 @@ class AllstepsEnv(DirectRLEnv):
         self.foot_indices = [self.robot.data.body_names.index(name) for name in self.foot_names]
         self.torso_index = self.robot.data.body_names.index(self.cfg.torso_name)
         self.hip_y_index = torch.tensor([self.robot.data.joint_names.index(name) for name in self.cfg.hip_y_names], dtype=torch.int64, device=self.device)
+        self.right_body_indices = torch.tensor([self.robot.data.joint_names.index(name) for name in self.cfg.right_body_names], dtype=torch.int64, device=self.device)
+        self.left_body_indices = torch.tensor([self.robot.data.joint_names.index(name) for name in self.cfg.left_body_names], dtype=torch.int64, device=self.device)
+        self.negation_body_indices = torch.tensor([self.robot.data.joint_names.index(name) for name in self.cfg.negation_body_names], dtype=torch.int64, device=self.device)
 
         # to-target potentials (will be updated in reset_idx)
         self.potentials = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
@@ -107,9 +115,9 @@ class AllstepsEnv(DirectRLEnv):
         self.pre_defined_swing_leg[env_ids] = temp_swing_leg[env_ids]
         
         full_steps_pose = torch.cat((self.steps_pos, torch.tensor([1, 0, 0, 0], dtype=torch.float32, device=self.device).repeat(self.num_envs, self.num_steps, 1)), dim=-1) # (num_envs, num_steps, 7)
-        self.steps.write_object_pose_to_sim(full_steps_pose[env_ids], env_ids)
+        # self.steps.write_object_pose_to_sim(full_steps_pose[env_ids], env_ids)
         pos_on_step = self.steps_pos.clone()
-        pos_on_step[:, :, 2] += 0.225 / 2
+        # pos_on_step[:, :, 2] += 0.225 / 2
         self.marker.visualize(translations=pos_on_step.view(-1, 3), marker_indices=self.marker_idx)
         
     def _generate_foot_steps_allsteps(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -213,24 +221,24 @@ class AllstepsEnv(DirectRLEnv):
         self.robot = Articulation(self.cfg.robot)
         self.sensor = ContactSensor(self.cfg.foot_contacts)
         # add ground plane
-        # spawn_ground_plane(
-        #     prim_path="/World/ground",
-        #     cfg=GroundPlaneCfg(
-        #         physics_material=sim_utils.RigidBodyMaterialCfg(
-        #             static_friction=1.0,
-        #             dynamic_friction=1.0,
-        #             restitution=0.0,
-        #         ),
-        #     ),
-        # )
-        self.steps = RigidObjectCollection(self.cfg.steps)
+        spawn_ground_plane(
+            prim_path="/World/ground",
+            cfg=GroundPlaneCfg(
+                physics_material=sim_utils.RigidBodyMaterialCfg(
+                    static_friction=1.0,
+                    dynamic_friction=1.0,
+                    restitution=0.0,
+                ),
+            ),
+        )
+        # self.steps = RigidObjectCollection(self.cfg.steps)
 
         # clone and replicate
         self.scene.clone_environments(copy_from_source=False)
         # add articulation to scene
         self.scene.articulations["robot"] = self.robot
         self.scene.sensors["foot_contacts"] = self.sensor
-        self.scene.rigid_object_collections["steps"] = self.steps
+        # self.scene.rigid_object_collections["steps"] = self.steps
         # add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
@@ -321,7 +329,7 @@ class AllstepsEnv(DirectRLEnv):
                 self.joint_pos_scaled, # 21
                 torch.clamp(self.robot.data.joint_vel * self.cfg.dof_vel_scale, -5, 5), # 21
                 self.foot_contact, # 2
-                self.targets_b.reshape(self.num_envs, -1) # 3 * 3 = 9
+                self.targets_b[:, 0:2].reshape(self.num_envs, -1) # 3 * 3 = 9
                 # self.steps_pos[:, -1, 0:2]
             ), 
             dim=-1
@@ -352,7 +360,7 @@ class AllstepsEnv(DirectRLEnv):
         joint_at_limit_cost = torch.count_nonzero(torch.abs(self.joint_pos_scaled) > 0.99, dim=-1).float() * self.cfg.joint_at_limit_cost_scale
         
         # Step reward to encourage the foot to step on the center of the target
-        step_reward_condition = (self.target_reached) & (self.target_reach_count == 1) & (self.curr_target_index < self.num_steps - 1) & (self.robot.data.joint_pos[torch.arange(self.num_envs), self.hip_y_index[self.swing_leg]] < 0)
+        step_reward_condition = (self.target_reached) & (self.target_reach_count == 1) & (self.curr_target_index < self.num_steps - 1) 
         dist = self.foot_to_target_dist_xy[torch.arange(self.num_envs), self.swing_leg]
         step_reward = torch.where(step_reward_condition, 50 * torch.exp( -dist / 0.25), torch.zeros_like(step_reward_condition))
         
@@ -450,11 +458,11 @@ class AllstepsEnv(DirectRLEnv):
         
     def _reset_idx(self, env_ids: torch.Tensor | None):
         # if we progress over half of the steps, we need to generate new foot steps
-        if self.curr_target_index.float().mean() > self.curriculum_progess_theshold:
-            self.curriculum = torch.clamp(self.curriculum + 1, 0, self.max_curriculum)
-            print("--------------------------------------------")
-            print(f"The current curriculum : {self.curriculum[0].item()}")
-            print("--------------------------------------------")
+        # if self.curr_target_index.float().mean() > self.curriculum_progess_theshold:
+        #     self.curriculum = torch.clamp(self.curriculum + 1, 0, self.max_curriculum)
+        #     print("--------------------------------------------")
+        #     print(f"The current curriculum : {self.curriculum[0].item()}")
+        #     print("--------------------------------------------")
 
         if env_ids is None or len(env_ids) == self.num_envs:
             env_ids = self.robot._ALL_INDICES
@@ -466,7 +474,8 @@ class AllstepsEnv(DirectRLEnv):
         self.potentials[env_ids] = 0.0
         
         self.target_reach_count[env_ids] = 0
-        self.curr_target_index[env_ids] = 1 # ignore first step
+        self.swing_leg[env_ids] = 0
+        self.curr_target_index[env_ids] = 1 # start from the second target
         self.prev_target_index[env_ids] = torch.clamp(self.curr_target_index[env_ids] - 1, 0, self.num_steps - 1)
         self.next_target_index[env_ids] = torch.clamp(self.curr_target_index[env_ids] + 1, 0, self.num_steps - 1)
         
@@ -486,6 +495,35 @@ class AllstepsEnv(DirectRLEnv):
         joint_pos[:, 4] = -torch.pi / 6 # Right shoulder z
         joint_pos[:, 7] = torch.pi / 6 # Left shoulder z
         joint_pos[:, [9, 10]] = torch.pi / 3 # Left elbow, right elbow
+
+        joint_vel = self.robot.data.default_joint_vel[env_ids]
+        default_root_state = self.robot.data.default_root_state[env_ids]
+        default_root_state[:, :3] += self.scene.env_origins[env_ids]
+
+        # 50% chance mirror the starting pose
+        mirror_masks = torch.rand(env_ids.shape, device=env_ids.device) > 0.5
+        original_mirror_ids = env_ids[mirror_masks]
+    
+        mirrored_joint_pos = joint_pos.clone()
+        mirrored_joint_pos[mirror_masks][:, self.right_body_indices] = joint_pos[mirror_masks][:, self.left_body_indices]
+        mirrored_joint_pos[mirror_masks][:, self.left_body_indices] = joint_pos[mirror_masks][:, self.right_body_indices]
+        mirrored_joint_pos[mirror_masks][:, self.negation_body_indices] *= -1
+        joint_pos[mirror_masks] = mirrored_joint_pos[mirror_masks] 
+
+        mirrored_joint_vel = joint_vel.clone()
+        mirrored_joint_vel[mirror_masks][:, self.right_body_indices] = joint_vel[mirror_masks][:, self.left_body_indices]
+        mirrored_joint_vel[mirror_masks][:, self.left_body_indices] = joint_vel[mirror_masks][:, self.right_body_indices]
+        mirrored_joint_vel[mirror_masks][:, self.negation_body_indices] *= -1
+        joint_vel[mirror_masks] = mirrored_joint_vel[mirror_masks]
+
+        mirrored_root_state = default_root_state.clone()
+        mirrored_root_state[mirror_masks][:, 4:7] *= -1 # flipped the quat axis (w, x, y, z) -> flip x,y,z
+        default_root_state[mirror_masks] = mirrored_root_state[mirror_masks]
+
+        self.swing_leg[original_mirror_ids] = self.swing_leg[original_mirror_ids] ^ 1 # flip the leg
+
+        ############## NOISE ##############
+        # Add noise to the joint position
         joint_pos[:] += sample_uniform(
             self.cfg.initial_joint_angle_range[0],
             self.cfg.initial_joint_angle_range[1],
@@ -505,13 +543,46 @@ class AllstepsEnv(DirectRLEnv):
             self.robot.data.joint_pos_limits[env_ids, :, 0],
             self.robot.data.joint_pos_limits[env_ids, :, 1],
         )
-        
-        joint_vel = self.robot.data.default_joint_vel[env_ids]
-        default_root_state = self.robot.data.default_root_state[env_ids]
-        default_root_state[:, :3] += self.scene.env_origins[env_ids]
+        ##########################################
 
         self.robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
         self.robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
         self.robot.write_joint_state_to_sim(clipped_joint_pos, joint_vel, None, env_ids)
         
         self._compute_useful_values() # here we still update state for every env 
+
+
+def get_symmetric_states(
+        obs: torch.Tensor, actions: torch.Tensor , env: RslRlVecEnvWrapper, is_critic: bool
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    
+    right_joint_indices = env.unwrapped.right_body_indices
+    left_joint_indices = env.unwrapped.left_body_indices
+    negation_joint_indices = env.unwrapped.negation_body_indices
+
+    K = 2 if env.observation_space.shape[1] == 56 else 3
+    steps_negation_indices = torch.tensor([K * i + 1 for i in range(3)], dtype=torch.int64, device=env.device) # y
+    root_negation_indices = torch.tensor([1, 4], dtype=torch.int64, device=env.device) # roll, vy
+
+    right_obs_indices = torch.cat((right_joint_indices + 6, right_joint_indices + 6 + env.action_space.shape[1], torch.tensor([6 + env.action_space.shape[1] * 2], dtype=torch.int64, device=env.device))) # joint pos, joint vel, foot contact
+    left_obs_indices = torch.cat((left_joint_indices + 6, left_joint_indices + 6 + env.action_space.shape[1], torch.tensor([6 + env.action_space.shape[1] * 2 + 1], dtype=torch.int64, device=env.device))) # joint pos, joint vel, foot contact
+    negation_obs_indices = torch.cat((root_negation_indices, 6 + negation_joint_indices, 6 + env.action_space.shape[1] + negation_joint_indices, 6 + env.action_space.shape[1] * 2 + 2 + steps_negation_indices)) # roll, vy, joint pos, joint vel, steps y
+
+    if obs is None:
+        mirrored_obs = None
+    else:
+        mirrored_obs = obs.clone()
+        mirrored_obs[:, right_obs_indices] = obs[:, left_obs_indices]
+        mirrored_obs[:, left_obs_indices] = obs[:, right_obs_indices]
+        mirrored_obs[:, negation_obs_indices] = -obs[:, negation_obs_indices]
+
+    if actions is None:
+        mirrored_actions = None
+    else:
+        mirrored_actions = actions.clone()
+        mirrored_actions[:, right_joint_indices] = actions[:, left_joint_indices]
+        mirrored_actions[:, left_joint_indices] = actions[:, right_joint_indices]
+        mirrored_actions[:, negation_joint_indices] = -actions[:, negation_joint_indices]
+
+    return mirrored_obs, mirrored_actions
+

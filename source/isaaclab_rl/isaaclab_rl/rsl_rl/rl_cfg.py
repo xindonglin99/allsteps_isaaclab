@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from dataclasses import MISSING
-from typing import Literal
+from typing import Literal, Callable
 
 from isaaclab.utils import configclass
 
@@ -28,6 +28,27 @@ class RslRlPpoActorCriticCfg:
     activation: str = MISSING
     """The activation function for the actor and critic networks."""
 
+@configclass
+class RslRlPpoSymmetryCfg:
+    """Configuration for the PPO symmetry."""
+    use_data_augmentation: bool = True  # this adds symmetric trajectories to the batch
+    use_mirror_loss: bool = False  # this adds symmetry loss term to the loss function
+
+    # string containing the module and function name to import.
+    # Example: "legged_gym.envs.locomotion.anymal_c.symmetry:get_symmetric_states"
+    #
+    # .. code-block:: python
+    #
+    #     @torch.no_grad()
+    #     def get_symmetric_states(
+    #        obs: Optional[torch.Tensor] = None, actions: Optional[torch.Tensor] = None, cfg: "BaseEnvCfg" = None, obs_type: str = "policy"
+    #     ) -> Tuple[torch.Tensor, torch.Tensor]:
+    #
+    data_augmentation_func: Callable | str | None = None 
+
+    # coefficient for symmetry loss term
+    # if 0, then no symmetry loss is used
+    mirror_loss_coeff: float = 0.0
 
 @configclass
 class RslRlPpoAlgorithmCfg:
@@ -72,27 +93,9 @@ class RslRlPpoAlgorithmCfg:
     max_grad_norm: float = MISSING
     """The maximum gradient norm."""
 
-@configclass
-class RslRlPpoSymmetryCfg:
-    """Configuration for the PPO symmetry."""
-    use_data_augmentation: bool = True  # this adds symmetric trajectories to the batch
-    use_mirror_loss: bool = False  # this adds symmetry loss term to the loss function
+    symmetry_cfg: RslRlPpoSymmetryCfg | None = None
+    """The symmetry configuration."""
 
-    # string containing the module and function name to import.
-    # Example: "legged_gym.envs.locomotion.anymal_c.symmetry:get_symmetric_states"
-    #
-    # .. code-block:: python
-    #
-    #     @torch.no_grad()
-    #     def get_symmetric_states(
-    #        obs: Optional[torch.Tensor] = None, actions: Optional[torch.Tensor] = None, cfg: "BaseEnvCfg" = None, obs_type: str = "policy"
-    #     ) -> Tuple[torch.Tensor, torch.Tensor]:
-    #
-    data_augmentation_func: str | None = None 
-
-    # coefficient for symmetry loss term
-    # if 0, then no symmetry loss is used
-    mirror_loss_coeff: float = 0.0
 
 @configclass
 class RslRlOnPolicyRunnerCfg:

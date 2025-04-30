@@ -52,7 +52,7 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     decimation = 4
     action_scale = 1.0
     action_space = 21
-    observation_space = 59
+    observation_space = 59 - 3
     state_space = 0
 
     # simulation
@@ -106,32 +106,32 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
 
     # foot contact sensors
     foot_contacts: ContactSensorCfg = ContactSensorCfg(
-        prim_path="/World/envs/env_.*/Robot/walker3d/.*_foot", update_period=0.0, history_length=4, debug_vis=True
+        prim_path="/World/envs/env_.*/Robot/walker3d/.*_foot", update_period=0.0, history_length=4, debug_vis=False
     )
     
     # Joint correspondence is different than in original file
     joint_gears: list = [
-        60, # abdomen_z
-        80, # abdomen_y
-        60, # right_shoulder_x
-        50, # right_shoulder_y
-        60, # right_shoulder_z
-        60, # left_shoulder_x
-        50, # left_shoulder_y
-        60, # left_shoulder_z
-        60, # abdomen_x
-        60, # right_elbow
-        60, # left_elbow
-        80, # right_hip_x
-        100, # right_hip_y
-        60, # right_hip_z
-        80, # left_hip_x
-        100, # left_hip_y
-        60, # left_hip_z
-        90, # right_knee
-        90, # left_knee
-        60, # right_ankle
-        60, # left_ankle
+        60, # abdomen_z         0
+        80, # abdomen_y         1
+        60, # right_shoulder_x  2
+        50, # right_shoulder_y  3
+        60, # right_shoulder_z  4
+        60, # left_shoulder_x   5
+        50, # left_shoulder_y   6
+        60, # left_shoulder_z   7
+        60, # abdomen_x         8
+        60, # right_elbow       9
+        60, # left_elbow        10
+        80, # right_hip_x       11
+        100, # right_hip_y      12
+        60, # right_hip_z       13
+        80, # left_hip_x        14
+        100, # left_hip_y       15
+        60, # left_hip_z        16
+        90, # right_knee        17
+        90, # left_knee         18
+        60, # right_ankle       19
+        60, # left_ankle        20
     ] # 21 WALER3d joint gears
     
     # joint_gears: list = [
@@ -194,6 +194,10 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     torso_name: str = "torso"
     foot_names: list = ["right_foot", "left_foot"]
     hip_y_names: list = ["right_hip_y", "left_hip_y"]
+    right_body_names: list = ["right_shoulder_x", "right_shoulder_y", "right_shoulder_z", "right_elbow", "right_hip_x", "right_hip_y","right_hip_z", "right_knee", "right_ankle"]
+    left_body_names: list = ["left_shoulder_x", "left_shoulder_y", "left_shoulder_z", "left_elbow", "left_hip_x", "left_hip_y","left_hip_z", "left_knee", "left_ankle"]
+    negation_body_names: list = ["abdomen_z", "abdomen_x"]
+
 
     energy_cost_scale: float = 0.005
     actions_cost_scale: float = 0.01

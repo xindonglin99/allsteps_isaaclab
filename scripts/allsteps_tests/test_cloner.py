@@ -44,7 +44,7 @@ class WalkerSceneCfg(InteractiveSceneCfg):
     )
 
     # articulation
-    walker: ArticulationCfg = WALKER_CFG.replace(prim_path="/World/envs/env_.*/Robot")
+    walker: ArticulationCfg = HUMANOID_28_CFG.replace(prim_path="/World/envs/env_.*/Robot")
     # walker.spawn.activate_contact_sensors = True
 
     #foot contact sensors

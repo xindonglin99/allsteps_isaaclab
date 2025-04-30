@@ -502,23 +502,24 @@ class AllstepsEnv(DirectRLEnv):
 
         # 50% chance mirror the starting pose
         mirror_masks = torch.rand(env_ids.shape, device=env_ids.device) > 0.5
+        subset_mirror_ids = torch.nonzero(mirror_masks, as_tuple=True)[0]
         original_mirror_ids = env_ids[mirror_masks]
     
         mirrored_joint_pos = joint_pos.clone()
-        mirrored_joint_pos[mirror_masks][:, self.right_body_indices] = joint_pos[mirror_masks][:, self.left_body_indices]
-        mirrored_joint_pos[mirror_masks][:, self.left_body_indices] = joint_pos[mirror_masks][:, self.right_body_indices]
-        mirrored_joint_pos[mirror_masks][:, self.negation_body_indices] *= -1
-        joint_pos[mirror_masks] = mirrored_joint_pos[mirror_masks] 
+        mirrored_joint_pos[subset_mirror_ids[:, None], self.right_body_indices] = joint_pos[subset_mirror_ids[:, None], self.left_body_indices]
+        mirrored_joint_pos[subset_mirror_ids[:, None], self.left_body_indices] = joint_pos[subset_mirror_ids[:, None], self.right_body_indices]
+        mirrored_joint_pos[subset_mirror_ids[:, None], self.negation_body_indices] *= -1
+        joint_pos[subset_mirror_ids] = mirrored_joint_pos[subset_mirror_ids] 
 
         mirrored_joint_vel = joint_vel.clone()
-        mirrored_joint_vel[mirror_masks][:, self.right_body_indices] = joint_vel[mirror_masks][:, self.left_body_indices]
-        mirrored_joint_vel[mirror_masks][:, self.left_body_indices] = joint_vel[mirror_masks][:, self.right_body_indices]
-        mirrored_joint_vel[mirror_masks][:, self.negation_body_indices] *= -1
-        joint_vel[mirror_masks] = mirrored_joint_vel[mirror_masks]
+        mirrored_joint_vel[subset_mirror_ids[:, None], self.right_body_indices] = joint_vel[subset_mirror_ids[:, None], self.left_body_indices]
+        mirrored_joint_vel[subset_mirror_ids[:, None], self.left_body_indices] = joint_vel[subset_mirror_ids[:, None], self.right_body_indices]
+        mirrored_joint_vel[subset_mirror_ids[:, None], self.negation_body_indices] *= -1
+        joint_vel[subset_mirror_ids] = mirrored_joint_vel[subset_mirror_ids]
 
         mirrored_root_state = default_root_state.clone()
-        mirrored_root_state[mirror_masks][:, 4:7] *= -1 # flipped the quat axis (w, x, y, z) -> flip x,y,z
-        default_root_state[mirror_masks] = mirrored_root_state[mirror_masks]
+        mirrored_root_state[subset_mirror_ids, 4:7] *= -1 # flipped the quat axis (w, x, y, z) -> flip x,y,z
+        default_root_state[subset_mirror_ids] = mirrored_root_state[subset_mirror_ids]
 
         self.swing_leg[original_mirror_ids] = self.swing_leg[original_mirror_ids] ^ 1 # flip the leg
 

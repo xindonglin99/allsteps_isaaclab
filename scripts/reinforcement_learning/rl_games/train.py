@@ -70,6 +70,8 @@ from isaaclab_rl.rl_games import RlGamesGpuEnv, RlGamesVecEnvWrapper
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
+from isaaclab_tasks.direct.allsteps.learning import a2c_ppo_mirroring
+
 
 @hydra_task_config(args_cli.task, "rl_games_cfg_entry_point")
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: dict):
@@ -161,6 +163,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     agent_cfg["params"]["config"]["num_actors"] = env.unwrapped.num_envs
     # create runner from rl-games
     runner = Runner(IsaacAlgoObserver())
+
+    # register the symmetry A2C agent
+    runner.algo_factory.register_builder('a2c_continuous_mirroring', lambda **kwargs : a2c_ppo_mirroring.A2CAgentSymmetry(**kwargs))
+    
     runner.load(agent_cfg)
 
     # reset the agent and env

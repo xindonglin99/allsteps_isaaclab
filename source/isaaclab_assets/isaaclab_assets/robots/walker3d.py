@@ -29,20 +29,12 @@ WALKER_CFG = ArticulationCfg(
             solver_velocity_iteration_count=0,
             sleep_threshold=0.005,
             stabilization_threshold=0.001,
-        ),
-
-        # Visual material seems to cause problem in cloning the robot
-        # visual_material=sim_utils.PreviewSurfaceCfg(
-        #     diffuse_color=(240.0 / 256.0, 0.0 / 256.0, 0.0 / 256.0),
-        #     emissive_color=(209.0 / 256.0, 42.0 / 256.0, 148.0 / 256.0),
-        #     metallic=0.2,
-        #     roughness=0.1,
-        # ),  
+        ), 
         copy_from_source=False,
         activate_contact_sensors=True,
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.1, 0.0, 1.5),
+        pos=(0.0, 0.0, 1.5),
         joint_pos={".*": 0.0},
     ),
     actuators={

@@ -56,6 +56,7 @@ import torch
 from rl_games.common import env_configurations, vecenv
 from rl_games.common.player import BasePlayer
 from rl_games.torch_runner import Runner
+from rl_games.algos_torch import players
 
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
 from isaaclab.utils.assets import retrieve_file_path
@@ -144,6 +145,8 @@ def main():
     agent_cfg["params"]["config"]["num_actors"] = env.unwrapped.num_envs
     # create runner from rl-games
     runner = Runner()
+    # register the symmetry A2C agent
+    runner.player_factory.register_builder('a2c_continuous_mirroring', lambda **kwargs : players.PpoPlayerContinuous(**kwargs))
     runner.load(agent_cfg)
     # obtain the agent from the runner
     agent: BasePlayer = runner.create_player()

@@ -52,7 +52,7 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     decimation = 4
     action_scale = 1.0
     action_space = 21
-    observation_space = 59 - 3
+    observation_space = 59
     state_space = 0
 
     # simulation
@@ -74,6 +74,14 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     # scene
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
 
+    # Visual material
+    visual_material: sim_utils.PreviewSurfaceCfg = sim_utils.PreviewSurfaceCfg(
+        diffuse_color=(240.0 / 256.0, 0.0 / 256.0, 0.0 / 256.0),
+        emissive_color=(209.0 / 256.0, 42.0 / 256.0, 148.0 / 256.0),
+        metallic=0.2,
+        roughness=0.1,
+    )
+
     # robot
     robot: ArticulationCfg = WALKER_CFG.replace(prim_path="/World/envs/env_.*/Robot")
 
@@ -83,9 +91,9 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
 
     camera_pos: Tuple[float, float, float] = (1.5, -4.0, 1.5)
 
-    step_radius: float = 0.35
+    step_radius: float = 0.25
 
-    marker_radius: float = 0.35
+    marker_radius: float = 0.25
 
     # foot step markers
     step_markers: VisualizationMarkersCfg = VisualizationMarkersCfg(
@@ -199,14 +207,14 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     negation_body_names: list = ["abdomen_z", "abdomen_x"]
 
 
-    energy_cost_scale: float = 0.005
+    energy_cost_scale: float = 0.009
     actions_cost_scale: float = 0.01
     alive_reward_scale: float = 2.0
     dof_vel_scale: float = 0.1
     joint_at_limit_cost_scale: float = 0.1
 
     death_cost: float = -1.0
-    termination_height_absolute: float = 0.2
+    termination_height_absolute: float = 0.4
 
     angular_velocity_scale: float = 0.25
 

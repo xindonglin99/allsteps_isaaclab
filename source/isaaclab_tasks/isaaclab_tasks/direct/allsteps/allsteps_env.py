@@ -19,6 +19,7 @@ from isaaclab.markers import VisualizationMarkers
 from isaaclab.sensors import ContactSensor
 
 from isaaclab_rl.rsl_rl.vecenv_wrapper import RslRlVecEnvWrapper
+from isaaclab_rl.rl_games import RlGamesVecEnvWrapper
 
 from isaaclab.envs import DirectRLEnv
 from .allsteps_env_cfg import AllstepsEnvCfg
@@ -37,21 +38,22 @@ class AllstepsEnv(DirectRLEnv):
         super().__init__(cfg, render_mode, **kwargs)
         
         # Terrain info
-        self.dist_range = torch.tensor([0.65, 0.9], dtype=torch.float32, device=self.device)
+        self.dist_range = torch.tensor([0.75, 0.9], dtype=torch.float32, device=self.device)
         self.pitch_range = torch.tensor([-30, 30], dtype=torch.float32, device=self.device)
         self.yaw_range = torch.tensor([-20, 20], dtype=torch.float32, device=self.device)
         self.tilt_range = torch.tensor([-15, 15], dtype=torch.float32, device=self.device)
         self.max_curriculum = torch.tensor(9, dtype=torch.int64, device=self.device)
         self.termination_curriculum = torch.linspace(0.75, 0.45, self.max_curriculum + 1).to(self.device)
-        self.applied_gain_curriculum = torch.linspace(1.1, 1.2, self.max_curriculum + 1).to(self.device)
+        self.applied_gain_curriculum = torch.linspace(1.2, 1.2, self.max_curriculum + 1).to(self.device)
         self.curriculum = torch.zeros(self.num_envs, dtype=torch.int64, device=self.device)
         self.num_steps = self.cfg.num_steps
-        self.init_step_separation = 0.65
+        self.init_step_separation = 0.75
         self.step_radius = self.cfg.step_radius
         self.target_dim = 3
         self.curriculum_progess_theshold = 12
         self.foot_sep = 0.16
         self.mirrored = False
+        self.stop_frames = 4 # 0.5 seconds -> 60hz control step
         
         
         self.look_ahead = 2
@@ -69,12 +71,11 @@ class AllstepsEnv(DirectRLEnv):
         self._generate_foot_steps()
 
         # pre allocate buffers
-        self.swing_leg = torch.zeros(self.num_envs, dtype=torch.int64, device=self.device) # Left leg start on next target [0,0]
+        self.swing_leg = torch.zeros(self.num_envs, dtype=torch.int64, device=self.device) 
         self.curr_target_index = torch.ones(self.num_envs, dtype=torch.int64, device=self.device) # WARNING: if change this, need to change the reset() as well
         self.prev_target_index = torch.clamp(self.curr_target_index - 1, 0, self.num_steps - 1)
         self.next_target_index = torch.clamp(self.curr_target_index + 1, 0, self.num_steps - 1)
         self.target_reach_count = torch.zeros(self.num_envs, dtype=torch.int64, device=self.device)
-        self.stop_frames = 2 # 0.5 seconds -> 60hz control step
         self.foot_contact = torch.zeros((self.num_envs, 2), dtype=torch.float32, device=self.device) # (N, B)
 
         # joint gears for torque controller
@@ -98,6 +99,7 @@ class AllstepsEnv(DirectRLEnv):
         self.old_obs = None
         self.old_action = None
         self.old_robot_data = None
+        self.curriculum_counter = 0
 
         
     
@@ -115,9 +117,9 @@ class AllstepsEnv(DirectRLEnv):
         self.pre_defined_swing_leg[env_ids] = temp_swing_leg[env_ids]
         
         full_steps_pose = torch.cat((self.steps_pos, torch.tensor([1, 0, 0, 0], dtype=torch.float32, device=self.device).repeat(self.num_envs, self.num_steps, 1)), dim=-1) # (num_envs, num_steps, 7)
-        # self.steps.write_object_pose_to_sim(full_steps_pose[env_ids], env_ids)
+        self.steps.write_object_pose_to_sim(full_steps_pose[env_ids], env_ids)
         pos_on_step = self.steps_pos.clone()
-        # pos_on_step[:, :, 2] += 0.225 / 2
+        pos_on_step[:, :, 2] += 0.225 / 2
         self.marker.visualize(translations=pos_on_step.view(-1, 3), marker_indices=self.marker_idx)
         
     def _generate_foot_steps_allsteps(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -221,24 +223,24 @@ class AllstepsEnv(DirectRLEnv):
         self.robot = Articulation(self.cfg.robot)
         self.sensor = ContactSensor(self.cfg.foot_contacts)
         # add ground plane
-        spawn_ground_plane(
-            prim_path="/World/ground",
-            cfg=GroundPlaneCfg(
-                physics_material=sim_utils.RigidBodyMaterialCfg(
-                    static_friction=1.0,
-                    dynamic_friction=1.0,
-                    restitution=0.0,
-                ),
-            ),
-        )
-        # self.steps = RigidObjectCollection(self.cfg.steps)
+        # spawn_ground_plane(
+        #     prim_path="/World/ground",
+        #     cfg=GroundPlaneCfg(
+        #         physics_material=sim_utils.RigidBodyMaterialCfg(
+        #             static_friction=1.0,
+        #             dynamic_friction=1.0,
+        #             restitution=0.0,
+        #         ),
+        #     ),
+        # )
+        self.steps = RigidObjectCollection(self.cfg.steps)
 
         # clone and replicate
         self.scene.clone_environments(copy_from_source=False)
         # add articulation to scene
         self.scene.articulations["robot"] = self.robot
         self.scene.sensors["foot_contacts"] = self.sensor
-        # self.scene.rigid_object_collections["steps"] = self.steps
+        self.scene.rigid_object_collections["steps"] = self.steps
         # add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
@@ -259,6 +261,7 @@ class AllstepsEnv(DirectRLEnv):
         ####### DEBUGGING #####
 
         self.actions = actions.clone()
+        self.actions = torch.clamp(self.actions, -1.0, 1.0)
         
     def _apply_action(self):
         # Torque controller
@@ -329,7 +332,7 @@ class AllstepsEnv(DirectRLEnv):
                 self.joint_pos_scaled, # 21
                 torch.clamp(self.robot.data.joint_vel * self.cfg.dof_vel_scale, -5, 5), # 21
                 self.foot_contact, # 2
-                self.targets_b[:, 0:2].reshape(self.num_envs, -1) # 3 * 3 = 9
+                self.targets_b.reshape(self.num_envs, -1) # 3 * 3 = 9
                 # self.steps_pos[:, -1, 0:2]
             ), 
             dim=-1
@@ -458,11 +461,15 @@ class AllstepsEnv(DirectRLEnv):
         
     def _reset_idx(self, env_ids: torch.Tensor | None):
         # if we progress over half of the steps, we need to generate new foot steps
-        # if self.curr_target_index.float().mean() > self.curriculum_progess_theshold:
-        #     self.curriculum = torch.clamp(self.curriculum + 1, 0, self.max_curriculum)
-        #     print("--------------------------------------------")
-        #     print(f"The current curriculum : {self.curriculum[0].item()}")
-        #     print("--------------------------------------------")
+        if self.curr_target_index.float().mean() > self.curriculum_progess_theshold:
+            self.curriculum = torch.clamp(self.curriculum + 1, 0, self.max_curriculum)
+            if self.curriculum_counter % 500 == 0:
+                print("--------------------------------------------")
+                print(f"The current curriculum : {self.curriculum[0].item()}")
+                print("--------------------------------------------")
+                self.curriculum_counter = 0
+            
+            self.curriculum_counter += 1
 
         if env_ids is None or len(env_ids) == self.num_envs:
             env_ids = self.robot._ALL_INDICES
@@ -554,36 +561,42 @@ class AllstepsEnv(DirectRLEnv):
 
 
 def get_symmetric_states(
-        obs: torch.Tensor, actions: torch.Tensor , env: RslRlVecEnvWrapper, is_critic: bool
+        obs: torch.Tensor, actions: torch.Tensor , env: RslRlVecEnvWrapper | RlGamesVecEnvWrapper, is_critic: bool
     ) -> Tuple[torch.Tensor, torch.Tensor]:
     
     right_joint_indices = env.unwrapped.right_body_indices
     left_joint_indices = env.unwrapped.left_body_indices
     negation_joint_indices = env.unwrapped.negation_body_indices
 
-    K = 2 if env.observation_space.shape[1] == 56 else 3
+    K = 2 if env.unwrapped.observation_space.shape[1] == 56 else 3
     steps_negation_indices = torch.tensor([K * i + 1 for i in range(3)], dtype=torch.int64, device=env.device) # y
     root_negation_indices = torch.tensor([1, 4], dtype=torch.int64, device=env.device) # roll, vy
 
-    right_obs_indices = torch.cat((right_joint_indices + 6, right_joint_indices + 6 + env.action_space.shape[1], torch.tensor([6 + env.action_space.shape[1] * 2], dtype=torch.int64, device=env.device))) # joint pos, joint vel, foot contact
-    left_obs_indices = torch.cat((left_joint_indices + 6, left_joint_indices + 6 + env.action_space.shape[1], torch.tensor([6 + env.action_space.shape[1] * 2 + 1], dtype=torch.int64, device=env.device))) # joint pos, joint vel, foot contact
-    negation_obs_indices = torch.cat((root_negation_indices, 6 + negation_joint_indices, 6 + env.action_space.shape[1] + negation_joint_indices, 6 + env.action_space.shape[1] * 2 + 2 + steps_negation_indices)) # roll, vy, joint pos, joint vel, steps y
+    right_obs_indices = torch.cat((right_joint_indices + 6, right_joint_indices + 6 + env.unwrapped.action_space.shape[1], torch.tensor([6 + env.unwrapped.action_space.shape[1] * 2], dtype=torch.int64, device=env.device))) # joint pos, joint vel, foot contact
+    left_obs_indices = torch.cat((left_joint_indices + 6, left_joint_indices + 6 + env.unwrapped.action_space.shape[1], torch.tensor([6 + env.unwrapped.action_space.shape[1] * 2 + 1], dtype=torch.int64, device=env.device))) # joint pos, joint vel, foot contact
+    negation_obs_indices = torch.cat((root_negation_indices, 6 + negation_joint_indices, 6 + env.unwrapped.action_space.shape[1] + negation_joint_indices, 6 + env.unwrapped.action_space.shape[1] * 2 + 2 + steps_negation_indices)) # roll, vy, joint pos, joint vel, steps y
 
     if obs is None:
         mirrored_obs = None
+        return_obs = None
     else:
         mirrored_obs = obs.clone()
         mirrored_obs[:, right_obs_indices] = obs[:, left_obs_indices]
         mirrored_obs[:, left_obs_indices] = obs[:, right_obs_indices]
         mirrored_obs[:, negation_obs_indices] = -obs[:, negation_obs_indices]
 
+        return_obs = torch.vstack((obs, mirrored_obs))
+
     if actions is None:
         mirrored_actions = None
+        return_actions = None
     else:
         mirrored_actions = actions.clone()
         mirrored_actions[:, right_joint_indices] = actions[:, left_joint_indices]
         mirrored_actions[:, left_joint_indices] = actions[:, right_joint_indices]
         mirrored_actions[:, negation_joint_indices] = -actions[:, negation_joint_indices]
 
-    return mirrored_obs, mirrored_actions
+        return_actions = torch.vstack((actions, mirrored_actions))
+
+    return return_obs, return_actions
 

@@ -60,3 +60,4 @@ _build
 
 # Pre-Trained Checkpoints
 /.pretrained_checkpoints/
+/rl_games

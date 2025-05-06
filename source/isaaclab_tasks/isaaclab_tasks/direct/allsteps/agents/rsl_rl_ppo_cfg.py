@@ -13,11 +13,11 @@ class AllstepsPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     experiment_name = "allsteps_ppo_direct"
     empirical_normalization = True
 
-    # symmetry_cfg = RslRlPpoSymmetryCfg(
-    #     use_data_augmentation=True,
-    #     use_mirror_loss=False,
-    #     data_augmentation_func=get_symmetric_states,
-    # )
+    symmetry_cfg = RslRlPpoSymmetryCfg(
+        use_data_augmentation=True,
+        use_mirror_loss=False,
+        data_augmentation_func=get_symmetric_states,
+    )
     
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
@@ -39,5 +39,5 @@ class AllstepsPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         lam=0.95,
         desired_kl=0.008,
         max_grad_norm=1.0,
-        # symmetry_cfg=symmetry_cfg,
+        symmetry_cfg=symmetry_cfg,
     )

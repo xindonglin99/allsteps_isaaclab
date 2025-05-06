@@ -53,7 +53,7 @@ class AllstepsEnv(DirectRLEnv):
         self.curriculum_progess_theshold = 12
         self.foot_sep = 0.16
         self.mirrored = False
-        self.stop_frames = 4 # 0.5 seconds -> 60hz control step
+        self.stop_frames = 2 # 0.5 seconds -> 60hz control step
         
         
         self.look_ahead = 2
@@ -223,16 +223,16 @@ class AllstepsEnv(DirectRLEnv):
         self.robot = Articulation(self.cfg.robot)
         self.sensor = ContactSensor(self.cfg.foot_contacts)
         # add ground plane
-        # spawn_ground_plane(
-        #     prim_path="/World/ground",
-        #     cfg=GroundPlaneCfg(
-        #         physics_material=sim_utils.RigidBodyMaterialCfg(
-        #             static_friction=1.0,
-        #             dynamic_friction=1.0,
-        #             restitution=0.0,
-        #         ),
-        #     ),
-        # )
+        spawn_ground_plane(
+            prim_path="/World/ground",
+            cfg=GroundPlaneCfg(
+                physics_material=sim_utils.RigidBodyMaterialCfg(
+                    static_friction=1.0,
+                    dynamic_friction=1.0,
+                    restitution=0.0,
+                ),
+            ),
+        )
         self.steps = RigidObjectCollection(self.cfg.steps)
 
         # clone and replicate
@@ -560,8 +560,8 @@ class AllstepsEnv(DirectRLEnv):
         self._compute_useful_values() # here we still update state for every env 
 
 
-def get_symmetric_states(
-        obs: torch.Tensor, actions: torch.Tensor , env: RslRlVecEnvWrapper | RlGamesVecEnvWrapper, is_critic: bool
+def get_symmetric_states_rsl_rl(
+        obs: torch.Tensor | None, actions: torch.Tensor | None, env: RslRlVecEnvWrapper | RlGamesVecEnvWrapper, is_critic: bool = False
     ) -> Tuple[torch.Tensor, torch.Tensor]:
     
     right_joint_indices = env.unwrapped.right_body_indices
@@ -599,4 +599,56 @@ def get_symmetric_states(
         return_actions = torch.vstack((actions, mirrored_actions))
 
     return return_obs, return_actions
+
+
+def get_symmetric_states_rl_games(
+        obs: torch.Tensor | None, actions: torch.Tensor | None, env: RslRlVecEnvWrapper | RlGamesVecEnvWrapper, is_critic: bool, mus: torch.Tensor | None
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    
+    right_joint_indices = env.unwrapped.right_body_indices
+    left_joint_indices = env.unwrapped.left_body_indices
+    negation_joint_indices = env.unwrapped.negation_body_indices
+
+    K = 2 if env.unwrapped.observation_space.shape[1] == 56 else 3
+    steps_negation_indices = torch.tensor([K * i + 1 for i in range(3)], dtype=torch.int64, device=env.device) # y
+    root_negation_indices = torch.tensor([1, 4], dtype=torch.int64, device=env.device) # roll, vy
+
+    right_obs_indices = torch.cat((right_joint_indices + 6, right_joint_indices + 6 + env.unwrapped.action_space.shape[1], torch.tensor([6 + env.unwrapped.action_space.shape[1] * 2], dtype=torch.int64, device=env.device))) # joint pos, joint vel, foot contact
+    left_obs_indices = torch.cat((left_joint_indices + 6, left_joint_indices + 6 + env.unwrapped.action_space.shape[1], torch.tensor([6 + env.unwrapped.action_space.shape[1] * 2 + 1], dtype=torch.int64, device=env.device))) # joint pos, joint vel, foot contact
+    negation_obs_indices = torch.cat((root_negation_indices, 6 + negation_joint_indices, 6 + env.unwrapped.action_space.shape[1] + negation_joint_indices, 6 + env.unwrapped.action_space.shape[1] * 2 + 2 + steps_negation_indices)) # roll, vy, joint pos, joint vel, steps y
+
+    if obs is None:
+        mirrored_obs = None
+        return_obs = None
+    else:
+        mirrored_obs = obs.clone()
+        mirrored_obs[:, right_obs_indices] = obs[:, left_obs_indices]
+        mirrored_obs[:, left_obs_indices] = obs[:, right_obs_indices]
+        mirrored_obs[:, negation_obs_indices] = -obs[:, negation_obs_indices]
+
+        return_obs = torch.vstack((obs, mirrored_obs))
+
+    if actions is None:
+        mirrored_actions = None
+        return_actions = None
+    else:
+        mirrored_actions = actions.clone()
+        mirrored_actions[:, right_joint_indices] = actions[:, left_joint_indices]
+        mirrored_actions[:, left_joint_indices] = actions[:, right_joint_indices]
+        mirrored_actions[:, negation_joint_indices] = -actions[:, negation_joint_indices]
+
+        return_actions = torch.vstack((actions, mirrored_actions))
+
+    if mus is None:
+        mirrored_mus = None
+        return_mus = None
+    else:
+        mirrored_mus = mus.clone()
+        mirrored_mus[:, right_joint_indices] = mus[:, left_joint_indices]
+        mirrored_mus[:, left_joint_indices] = mus[:, right_joint_indices]
+        mirrored_mus[:, negation_joint_indices] = -mus[:, negation_joint_indices]
+
+        return_mus = torch.vstack((mus, mirrored_mus))
+
+    return return_obs, return_actions, return_mus
 

@@ -222,6 +222,8 @@ class AllstepsEnv(DirectRLEnv):
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
         self.sensor = ContactSensor(self.cfg.foot_contacts)
+        self.sensor_left = ContactSensor(self.cfg.foot_contacts_left)
+        self.sensor_right = ContactSensor(self.cfg.foot_contacts_right)
         # add ground plane
         # spawn_ground_plane(
         #     prim_path="/World/ground",
@@ -240,6 +242,8 @@ class AllstepsEnv(DirectRLEnv):
         # add articulation to scene
         self.scene.articulations["robot"] = self.robot
         self.scene.sensors["foot_contacts"] = self.sensor
+        self.scene.sensors["foot_contacts_left"] = self.sensor_left
+        self.scene.sensors["foot_contacts_right"] = self.sensor_right
         self.scene.rigid_object_collections["steps"] = self.steps
         # add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
@@ -414,8 +418,11 @@ class AllstepsEnv(DirectRLEnv):
     def _calculate_foot_state(self):
         '''Calculate the foot state and update the target index.
         '''
-        contact_forces = torch.linalg.vector_norm(self.sensor.data.net_forces_w, dim=-1) # (N, B)
-        binary_contact = contact_forces > EPSILON # (N, B)
+        contact_forces_left = torch.linalg.vector_norm(self.sensor_left.data.force_matrix_w, dim=-1).squeeze(dim=1) # (N, M)
+        contact_forces_right = torch.linalg.vector_norm(self.sensor_right.data.force_matrix_w, dim=-1).squeeze(dim=1) # (N, M)
+        contact_forces = torch.stack((contact_forces_right, contact_forces_left), dim=-1) # (N, M, 2)
+        contact_forces_masked = contact_forces[torch.arange(self.num_envs), self.curr_target_index]
+        binary_contact = contact_forces_masked > EPSILON # (N, 2)
         self.foot_contact[:] = binary_contact.float()
         
         # XY distance

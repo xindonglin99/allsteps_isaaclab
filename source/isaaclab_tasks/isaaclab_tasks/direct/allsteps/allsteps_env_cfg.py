@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple
+from typing import Tuple, List
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg, RigidObjectCfg, RigidObjectCollectionCfg
@@ -13,14 +13,16 @@ from isaaclab.sensors import ContactSensorCfg
 
 from isaaclab_assets import WALKER_CFG, HUMANOID_28_CFG, HUMANOID_CFG
 
-def create_step_cfg(num_steps: int, size: Tuple[float, float, float]) -> RigidObjectCollectionCfg:
+def create_step_cfg(num_steps: int, size: Tuple[float, float, float]) -> Tuple[RigidObjectCollectionCfg, List]:
     """Create a step configuration."""
+    all_paths = []
     collection = {}
     spawn_cfg = sim_utils.CuboidCfg(
         size=size,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
         collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
-        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.1, 0.1, 0.1), metallic=0.2),
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.2, 0.9, 0.2), metallic=0.2),
+        activate_contact_sensors=True,
         # physics_material=sim_utils.RigidBodyMaterialCfg(
         #     friction_combine_mode="average",
         #     restitution_combine_mode="average",
@@ -34,6 +36,8 @@ def create_step_cfg(num_steps: int, size: Tuple[float, float, float]) -> RigidOb
     for i in range(num_steps):
         key = "step_" + str(i)
         current_prim_path = "/World/envs/env_.*/" + key 
+        # contact_path = current_prim_path + "/geometry/mesh"
+        all_paths.append(current_prim_path)
         collection[key] = RigidObjectCfg(
             prim_path=current_prim_path,
             spawn=spawn_cfg,
@@ -42,8 +46,7 @@ def create_step_cfg(num_steps: int, size: Tuple[float, float, float]) -> RigidOb
             debug_vis=False,
     )
 
-        
-    return RigidObjectCollectionCfg(rigid_objects=collection)
+    return RigidObjectCollectionCfg(rigid_objects=collection), all_paths
 
 @configclass
 class AllstepsEnvCfg(DirectRLEnvCfg):
@@ -77,9 +80,7 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
     # Visual material
     visual_material: sim_utils.PreviewSurfaceCfg = sim_utils.PreviewSurfaceCfg(
         diffuse_color=(240.0 / 256.0, 0.0 / 256.0, 0.0 / 256.0),
-        emissive_color=(209.0 / 256.0, 42.0 / 256.0, 148.0 / 256.0),
         metallic=0.2,
-        roughness=0.1,
     )
 
     # robot
@@ -87,7 +88,9 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
 
     # Steps
     num_steps: int = 20
-    steps: RigidObjectCollectionCfg = create_step_cfg(num_steps=num_steps, size=(0.5, 0.8, 0.225))
+    steps_result = create_step_cfg(num_steps=num_steps, size=(0.5, 0.8, 0.225))
+    steps: RigidObjectCollectionCfg = steps_result[0]
+    step_paths: List = steps_result[1]
 
     camera_pos: Tuple[float, float, float] = (1.5, -4.0, 1.5)
 
@@ -114,7 +117,16 @@ class AllstepsEnvCfg(DirectRLEnvCfg):
 
     # foot contact sensors
     foot_contacts: ContactSensorCfg = ContactSensorCfg(
-        prim_path="/World/envs/env_.*/Robot/walker3d/.*_foot", update_period=0.0, history_length=4, debug_vis=False
+        prim_path="/World/envs/env_.*/Robot/walker3d/.*_foot", update_period=0.0, history_length=4, debug_vis=False,)
+
+    foot_contacts_left: ContactSensorCfg = ContactSensorCfg(
+        prim_path="/World/envs/env_.*/Robot/walker3d/left_foot", update_period=0.0, history_length=4, debug_vis=False,
+        filter_prim_paths_expr=step_paths,
+    )
+
+    foot_contacts_right: ContactSensorCfg = ContactSensorCfg(
+        prim_path="/World/envs/env_.*/Robot/walker3d/right_foot", update_period=0.0, history_length=4, debug_vis=False,
+        filter_prim_paths_expr=step_paths,
     )
     
     # Joint correspondence is different than in original file
